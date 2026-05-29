@@ -1,0 +1,188 @@
+{
+  // ============================================================
+  // Enterprise Managed Settings (IT-deployed, root-owned)
+  // ============================================================
+  // Deploy at:
+  //   Linux:   /etc/claude-code/managed-settings.json
+  //   macOS:   /Library/Application Support/ClaudeCode/managed-settings.json
+  //   Windows: C:\ProgramData\ClaudeCode\managed-settings.json
+  //
+  // Ownership: root:root 0644 (Linux/macOS) or Administrators:Full (Windows)
+  // Users CANNOT modify this file.
+  //
+  // Schema version: 1.0
+  // Last updated: 2026-05-28
+
+  // --- Admin-only lockdowns [TESTED ✅] ---
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "allowManagedMcpServersOnly": true,
+
+  // --- Sandbox (OS-level enforcement) [TESTED ✅ on Linux] ---
+  // [NOTE] Sandbox not supported on native Windows — use sandbox.failIfUnavailable
+  // to force WSL2, or omit the sandbox block in Windows managed settings.
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "allowWrite": ["./"],
+      "denyRead": [
+        "~/.aws/credentials",
+        "~/.aws/config",
+        "~/.ssh/",
+        "~/.gnupg/",
+        "~/.netrc",
+        "~/.git-credentials"
+      ],
+      "allowManagedReadPathsOnly": true
+    },
+    "network": {
+      "allowedDomains": [
+        "bedrock-runtime.*.amazonaws.com",
+        "*.bedrock-runtime.*.vpce.amazonaws.com"
+        // Add your enterprise domains here:
+        // "*.internal.yourcompany.com",
+        // "registry.npmjs.org",
+        // "pypi.org"
+      ],
+      "deniedDomains": [
+        "github.com",
+        "gitlab.com",
+        "bitbucket.org",
+        "pastebin.com",
+        "transfer.sh",
+        "file.io"
+      ],
+      "allowManagedDomainsOnly": true
+    }
+  },
+
+  // --- Permission controls (FULL deny list — replicated from user settings) ---
+  // Placing deny rules here makes them un-removable by users when
+  // allowManagedPermissionRulesOnly: true is set above.
+  "permissions": {
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable",
+    "disableAutoMode": "disable",
+    "deny": [
+      // --- Destructive filesystem ---
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(shutdown:*)",
+      "Bash(reboot:*)",
+
+      // --- Git (push handled by git-guard.sh hook for fine-grained control) ---
+      "Bash(git push:*)",                  // baseline: hook adds branch/remote allowlist
+      "Bash(git reset --hard:*)",          // backup: hook also catches this
+
+      // --- Network exfiltration ---
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+
+      // --- Privilege escalation ---
+      "Bash(sudo:*)",
+      "Bash(su:*)",
+
+      // --- Sensitive AWS operations ---
+      "Bash(aws iam:*)",
+      "Bash(aws sts:*)",
+      "Bash(aws secretsmanager:*)",
+
+      // --- Sensitive file reads (gitignore-style) ---
+      "Read(**/.aws/credentials)",
+      "Read(**/.aws/config)",
+      "Read(**/.ssh/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/.netrc)",
+      "Read(**/.git-credentials)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets.yaml)",
+      "Read(**/secrets.yml)",
+      "Read(**/secrets.json)",
+      "Read(**/credentials.json)",
+
+      // --- Web tools ---
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+
+  // --- Feature restrictions ---
+  // [UNVERIFIED on headless Linux — re-test on actual workstation deployment]
+  "disableRemoteControl": true,
+  "disableAgentView": true,
+  "disableDeepLinkRegistration": true,
+
+  // --- MCP lockdown ---
+  "allowedMcpServers": [],
+  "deniedMcpServers": ["*"],
+
+  // --- Hooks (audit + policy enforcement) ---
+  // ALL three hooks are deployed:
+  //   1. git-guard.sh    — enterprise git policy (allowlist, branch protection)
+  //   2. pii-guard.sh    — PII/secrets scanner (UserPromptSubmit + PreToolUse)
+  //   3. audit-logger.sh — append-only audit log (PostToolUse + UserPromptSubmit)
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/git-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh"
+          }
+        ]
+      }
+    ]
+  },
+
+  // --- Environment variables ---
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "AWS_REGION": "us-east-1",
+    "DISABLE_UPDATES": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "BASH_DEFAULT_TIMEOUT_MS": "30000",
+    "BASH_MAX_TIMEOUT_MS": "120000",
+
+    // git-guard configuration (customize per enterprise)
+    "GIT_GUARD_ALLOWED_DOMAINS": "gitlab.yourcompany.com,*.internal.yourcompany.com",
+    "GIT_GUARD_PROTECTED_BRANCHES": "main,master,release/*,production",
+    "GIT_GUARD_ALLOW_FORCE_PUSH": "false",
+
+    // audit-logger configuration
+    "CLAUDE_AUDIT_LOG": "/var/log/claude-code/audit.jsonl",
+    "CLAUDE_AUDIT_ALERT_CMD": "" // optional: webhook URL for SIEM
+  }
+}

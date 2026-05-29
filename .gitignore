@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+package-lock.json
+
+# Keys / secrets (should never be in this repo)
+*.pem
+*.key
+.env
+.env.*
+credentials.json
+secrets.yaml
+secrets.yml
+
+# Test artifacts (regenerated locally; may contain hostname/paths)
+test-run/
+tests/results/
+
+# Local Claude Code session state (machine-specific)
+.claude/
+
+# Local Python venv used for HCL validation
+.venv/

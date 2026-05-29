@@ -1,0 +1,130 @@
+{
+  // ============================================================
+  // Enterprise Claude Code — Linux/macOS User Settings
+  // Place at: ~/.claude/settings.json
+  // ============================================================
+  // Tested: 2026-05-26/27 on Amazon Linux 2023, claude-code 2.1.150 + 2.1.152
+  // All [TESTED ✅] annotations indicate verified behavior.
+
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "AWS_REGION": "us-east-1",                    // Change to your Bedrock region
+    "AWS_DEFAULT_REGION": "us-east-1",
+    "ANTHROPIC_MODEL": "us.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+
+    // VPC Endpoint URL (replace with your VPCE DNS or regional endpoint)
+    "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+
+    // Optional: proxy for routing to VPC Endpoint from developer laptops
+    // "HTTPS_PROXY": "https://your-proxy.internal:8080",
+    // "NO_PROXY": "localhost,127.0.0.1",
+
+    // Optional: custom CA for TLS inspection proxy
+    // "NODE_EXTRA_CA_CERTS": "/etc/your-org/proxy-ca.crt",
+
+    // Optional: Bedrock Guardrails
+    // "ANTHROPIC_CUSTOM_HEADERS": "X-Amzn-Bedrock-GuardrailIdentifier: your-id\nX-Amzn-Bedrock-GuardrailVersion: 1",
+
+    // [TESTED ✅] Blocks `claude update` with "Updates are disabled by your administrator"
+    "DISABLE_UPDATES": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+
+    // Timeouts (stricter than defaults)
+    "BASH_DEFAULT_TIMEOUT_MS": "30000",
+    "BASH_MAX_TIMEOUT_MS": "120000",
+    "MCP_TIMEOUT": "10000"
+  },
+
+  "permissions": {
+    "defaultMode": "default",
+
+    // [TESTED ❌ FAILED in --print mode] — kept as defense-in-depth.
+    // Real mitigation: wrapper script (see scripts/wrapper-linux.sh)
+    "disableBypassPermissionsMode": "disable",
+
+    "deny": [
+      // --- Destructive filesystem [TESTED ✅] ---
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(shutdown:*)",
+      "Bash(reboot:*)",
+
+      // --- Git push (data exfiltration) [TESTED ✅] ---
+      // NOTE: Must use :* (colon) syntax. Space-asterisk does NOT work on Bash matcher.
+      "Bash(git push:*)",
+
+      // --- Git reset (destructive) [TESTED ❌ deny rule fails — enforced by hook] ---
+      // Kept for documentation; actual enforcement is via PreToolUse hook.
+      "Bash(git reset --hard:*)",
+
+      // --- Network tools (data exfiltration) [TESTED ✅] ---
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+
+      // --- Privilege escalation [TESTED ✅] ---
+      "Bash(sudo:*)",
+      "Bash(su:*)",
+
+      // --- Sensitive AWS operations [TESTED ✅] ---
+      "Bash(aws iam:*)",
+      "Bash(aws sts:*)",
+      "Bash(aws secretsmanager:*)",
+
+      // --- Sensitive file reads [TESTED ✅] ---
+      "Read(**/.aws/credentials)",
+      "Read(**/.aws/config)",
+      "Read(**/.ssh/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/.netrc)",
+      "Read(**/.git-credentials)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets.yaml)",
+      "Read(**/secrets.yml)",
+      "Read(**/secrets.json)",
+      "Read(**/credentials.json)",
+
+      // --- Web tools removed from context [TESTED ✅] ---
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "availableModels": ["sonnet", "haiku"],
+
+  "enableAllProjectMcpServers": false,
+  "enabledMcpjsonServers": [],
+  "disabledMcpjsonServers": ["*"],
+
+  // --- PreToolUse hooks [TESTED ✅] ---
+  // git-guard.sh    — git remote/push/reset/clean enforcement
+  // pii-guard.sh    — PII/secrets scan in tool inputs
+  // audit-logger.sh — append-only audit log
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/git-guard.sh" },
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh" },
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh" }
+      ]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh" }
+      ]
+    }],
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh" }
+      ]
+    }]
+  }
+}

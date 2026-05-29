@@ -1,0 +1,107 @@
+{
+  // ============================================================
+  // Enterprise Claude Code — Windows User Settings (PowerShell Only)
+  // Place at: %USERPROFILE%\.claude\settings.json
+  // ============================================================
+  // Tested: 2026-05-27 on Windows Server 2022, claude-code 2.1.152, PowerShell 7.4.6
+  // Git for Windows NOT installed — pure PowerShell environment.
+
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "AWS_REGION": "us-east-1",
+    "AWS_DEFAULT_REGION": "us-east-1",
+    "ANTHROPIC_MODEL": "us.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+
+    // Optional: proxy, CA cert, Guardrails (same as Linux, adjust paths)
+    // "HTTPS_PROXY": "https://your-proxy.internal:8080",
+    // "NODE_EXTRA_CA_CERTS": "C:\\YourOrg\\proxy-ca.crt",
+
+    "DISABLE_UPDATES": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "BASH_DEFAULT_TIMEOUT_MS": "30000",
+    "BASH_MAX_TIMEOUT_MS": "120000",
+    "MCP_TIMEOUT": "10000"
+  },
+
+  "permissions": {
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable",  // [TESTED ❌ in -p mode — use wrapper]
+
+    "deny": [
+      // --- Remove Bash tool entirely [TESTED ✅] ---
+      // Without Git for Windows, this is redundant but harmless.
+      // With Git for Windows installed, this prevents Claude from using Git Bash.
+      "Bash",
+
+      // --- PowerShell: Destructive [TESTED ✅] ---
+      // Aliases (rm, del, rd, rmdir) are auto-canonicalized.
+      "PowerShell(Remove-Item *)",
+      "PowerShell(Format-Volume *)",
+      "PowerShell(Stop-Computer *)",
+      "PowerShell(Restart-Computer *)",
+
+      // --- PowerShell: Git (data exfiltration) [TESTED ✅] ---
+      // NOTE: Unlike Bash, PowerShell matcher correctly handles space-asterisk
+      // for multi-token commands. No :* workaround or hook needed.
+      "PowerShell(git push *)",
+      "PowerShell(git remote add *)",
+      "PowerShell(git remote set-url *)",
+      "PowerShell(git reset --hard *)",
+
+      // --- PowerShell: Network (data exfiltration) [TESTED ✅] ---
+      // Aliases (iwr, irm, curl, wget) are auto-canonicalized.
+      "PowerShell(Invoke-WebRequest *)",
+      "PowerShell(Invoke-RestMethod *)",
+      "PowerShell(curl *)",
+      "PowerShell(wget *)",
+
+      // --- PowerShell: Process execution [TESTED ✅] ---
+      "PowerShell(Start-Process *)",
+
+      // --- PowerShell: Security policy [TESTED ✅] ---
+      "PowerShell(Set-ExecutionPolicy *)",
+
+      // --- PowerShell: Sensitive AWS [TESTED ✅] ---
+      "PowerShell(aws iam *)",
+      "PowerShell(aws sts *)",
+      "PowerShell(aws secretsmanager *)",
+
+      // --- Read: Sensitive files ---
+      // [TESTED ❌ on Windows] Read deny rules may not work due to path
+      // normalization (backslash vs forward slash). Use sandbox.filesystem.denyRead
+      // in managed-settings.json for OS-level enforcement.
+      "Read(**/.aws/credentials)",
+      "Read(**/.aws/config)",
+      "Read(**/.ssh/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/.netrc)",
+      "Read(**/.git-credentials)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets.yaml)",
+      "Read(**/secrets.yml)",
+      "Read(**/secrets.json)",
+      "Read(**/credentials.json)",
+
+      // --- Write: System directories [TESTED ✅] ---
+      "Write(C:/Windows/**)",
+      "Write(C:/Program Files/**)",
+      "Write(C:/Program Files (x86)/**)",
+      "Write(C:/ProgramData/**)",
+
+      // --- Web tools [TESTED ✅] ---
+      "WebFetch",
+      "WebSearch"
+    ]
+  },
+
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "availableModels": ["sonnet", "haiku"],
+  "enableAllProjectMcpServers": false,
+  "enabledMcpjsonServers": [],
+  "disabledMcpjsonServers": ["*"]
+}
