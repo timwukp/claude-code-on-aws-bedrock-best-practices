@@ -114,9 +114,16 @@ Actions per detected entity: BLOCK or ANONYMIZE (mask with placeholder).
 Detects hallucinated content by comparing model output against provided source
 material. Configurable threshold for grounding score.
 
-For Claude Code, this can flag outputs that diverge from the content of files
+For Claude Code, this may flag outputs that diverge from the content of files
 provided in context -- useful when the model is supposed to summarize or
 transform existing code rather than generate new content.
+
+> **Note:** How Bedrock determines "source material" for grounding evaluation in
+> a Claude Code conversation is not fully documented. It depends on how Bedrock
+> interprets the conversation history as reference material. The grounding check
+> may not activate at all for novel code generation tasks (where there is no
+> explicit reference document). Test this policy in your environment before
+> relying on it -- see [Items Requiring Verification](#items-requiring-verification).
 
 ### 7. Automated Reasoning Checks
 
@@ -469,6 +476,13 @@ relying on them in production:
    [#63637](https://github.com/anthropics/claude-code/issues/63637) for
    resolution. When Claude Code adds input tag support, re-enable the Prompt
    Attack policy.
+
+10. **Contextual Grounding behavior** -- verify how Bedrock interprets
+    conversation history as "source material" for grounding checks. Test whether
+    the policy triggers for novel code generation (where no explicit reference
+    document is provided) and whether it produces false positives or simply does
+    not activate. Adjust thresholds or disable if the behavior is unhelpful for
+    your use case.
 
 ## References
 

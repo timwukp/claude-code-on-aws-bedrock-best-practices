@@ -233,7 +233,7 @@ claude-code-enterprise-bedrock/
 ├── README.md                              ← this file
 ├── README.zh-TW.md                        ← 繁體中文版
 ├── LICENSE                                ← Apache 2.0
-├── docs/                                  ← 15 markdown + 3 JSONC config files
+├── docs/                                  ← 18 markdown + 3 JSONC config files
 │   ├── bedrock-guardrails.md              ← Bedrock Guardrails integration guide
 │   ├── deployment-guide.md
 │   ├── operations-runbook.md

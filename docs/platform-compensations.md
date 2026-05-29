@@ -44,24 +44,27 @@ path before any local hook gets a chance to inspect it.
 **Compensation — Bedrock Guardrails as required server-side filter.**
 
 1. Create a Bedrock Guardrail with PII filtering for the same data classes the
-   local PII guard catches (CC, AWS keys, JWT, NRIC, …).
-2. Reference the Guardrail ARN in `managed-settings.json`:
+   local PII guard catches (CC, AWS keys, JWT, NRIC, ...).
+2. Pass the guardrail headers via `ANTHROPIC_CUSTOM_HEADERS` in
+   `managed-settings.json` (this is the mechanism Claude Code reads):
    ```jsonc
    "env": {
-     "AWS_BEDROCK_GUARDRAIL_ID": "abc12345",
-     "AWS_BEDROCK_GUARDRAIL_VERSION": "DRAFT"
+     "ANTHROPIC_CUSTOM_HEADERS": "X-Amzn-Bedrock-GuardrailIdentifier: your-guardrail-id\nX-Amzn-Bedrock-GuardrailVersion: 1"
    }
    ```
+   See [bedrock-guardrails.md](bedrock-guardrails.md) for full configuration
+   details.
 3. Add a startup self-check (run as part of the wrapper) that calls
    `bedrock:GetGuardrail` and refuses to launch claude if the Guardrail is
    missing, in DRAFT-only mode, or has fewer than the expected filter classes.
-4. Add a CloudWatch alarm on `BedrockGuardrails:Intervened` count — sustained
+4. Add a CloudWatch alarm on `BedrockGuardrails:Intervened` count -- sustained
    non-zero means the local PII guard is missing patterns.
 
 **Verify.**
 ```powershell
 # Confirm guardrail is active before allowing claude to run:
-aws bedrock get-guardrail --guardrail-identifier $env:AWS_BEDROCK_GUARDRAIL_ID `
+$guardrailId = "your-guardrail-id"
+aws bedrock get-guardrail --guardrail-identifier $guardrailId `
   --query 'status' --output text  # must be READY
 ```
 
