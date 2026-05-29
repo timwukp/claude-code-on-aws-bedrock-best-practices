@@ -37,7 +37,7 @@ Claude Code 功能強大,但預設情況下可能會:
 
 ## 深度防禦架構
 
-五層強制執行機制,全部在實際 AWS 環境測試過:
+六層強制執行機制,全部在實際 AWS 環境測試過:
 
 | 層級 | 機制 | 攔下什麼 | 詳細文件 |
 |---|---|---|---|
@@ -45,7 +45,8 @@ Claude Code 功能強大,但預設情況下可能會:
 | 2 | **`pii-guard.sh`** Hook | Prompt 與工具輸入中的敏感資料 | [`docs/pii-guard.md`](docs/pii-guard.md) |
 | 3 | **`git-guard.sh`** Hook | 未授權 git push、分支違規、force-push | [hook 原始碼](hooks/git-guard.sh) |
 | 4 | **`audit-logger.sh`** Hook | 規避稽核 (偵測型控制) | [hook 原始碼](hooks/audit-logger.sh) |
-| 5 | **Wrapper Script + 檔案系統 ACL** | `--dangerously-skip-permissions`、`claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 5 | **`token-budget-guard.sh`** Hook | Token 費用爆炸、失控的 session | [hook 原始碼](hooks/token-budget-guard.sh) |
+| 6 | **Wrapper Script + 檔案系統 ACL** | `--dangerously-skip-permissions`、`claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
 
 加上 **作業系統沙盒** (bubblewrap) 與 **網路隔離** (VPC Endpoint)。
 完整的 STRIDE 攻擊樹分析請參考 [`docs/threat-model.md`](docs/threat-model.md)。
@@ -56,7 +57,7 @@ Claude Code 從四個層級合併設定。較高層級覆蓋較低層級,managed
 
 | 層級 | 路徑 | 擁有者 | 已測試 |
 |---|---|---|---|
-| 1. 企業 Managed (最高) | `/etc/claude-code/managed-settings.json` (Linux)<br>`C:\ProgramData\ClaudeCode\managed-settings.json` (Win) | root / Administrators | ✅ |
+| 1. 企業 Managed (最高) | `/etc/claude-code/managed-settings.json` (Linux)<br>`C:\Program Files\ClaudeCode\managed-settings.json` (Win) | root / Administrators | ✅ |
 | 2. User Settings | `~/.claude/settings.json` | 開發者 | ✅ |
 | 3. Project Settings (可分享) | `.claude/settings.json` (在 repo 中) | 團隊 | (與 L2 同格式) |
 | 4. Local Project Overrides | `.claude/settings.local.json` (gitignored) | 開發者 | (同格式) |
@@ -77,6 +78,15 @@ Claude Code 從四個層級合併設定。較高層級覆蓋較低層級,managed
 ## 快速開始 (Linux/macOS,5 分鐘)
 
 ```bash
+# 0. 安裝 Claude Code
+# 建議方式:
+curl -fsSL https://claude.ai/install.sh | bash          # macOS / Linux
+# 其他方式:
+# brew install --cask claude-code                       # Homebrew
+# irm https://claude.ai/install.ps1 | iex              # Windows (PowerShell)
+# winget install Anthropic.ClaudeCode                   # Windows (winget)
+# npm install -g @anthropic-ai/claude-code              # 已棄用的備用方式
+
 # 1. 安裝相依套件
 sudo dnf install -y bubblewrap socat jq    # 或 apt install ...
 
@@ -251,7 +261,7 @@ claude-code-enterprise-bedrock/
 
 | 元件 | 版本 |
 |---|---|
-| Claude Code | 2.1.150, 2.1.152 |
+| Claude Code | 2.1.150, 2.1.152, 2.1.156 |
 | Linux | Amazon Linux 2023 (EC2 t3.medium) |
 | Windows | Windows Server 2022 (EC2 t3.medium) |
 | Node.js | 20.18.0, 20.20.2 LTS |
@@ -259,6 +269,17 @@ claude-code-enterprise-bedrock/
 | AWS Bedrock | us-east-1 透過 VPC Endpoint (private DNS) |
 | Sandbox | bubblewrap 0.10.0 + socat 1.7.4.2 (Linux) |
 | 模型 | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+
+### 最低版本需求
+
+本套件的部分功能需要特定 Claude Code 版本:
+
+| 功能 | 最低版本 |
+|---|---|
+| `sandbox.network.deniedDomains` | v2.1.113+ |
+| `managed-settings.d/` 目錄支援 | v2.1.83+ |
+| `DISABLE_AUTOUPDATER` 環境變數 | v2.1.118+ |
+| `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ |
 
 ## 授權與貢獻
 
