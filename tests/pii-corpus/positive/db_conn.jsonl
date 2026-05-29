@@ -1,0 +1,7 @@
+{"label":"DB_CONNECTION_STRING","desc":"postgres","text":"DATABASE_URL=postgres://user:pass@db.host:5432/app"}
+{"label":"DB_CONNECTION_STRING","desc":"mongodb","text":"mongo=mongodb://admin:secret@cluster:27017/prod"}
+{"label":"DB_CONNECTION_STRING","desc":"mongodb srv","text":"uri=mongodb+srv://user:pwd@cluster.mongodb.net/db"}
+{"label":"DB_CONNECTION_STRING","desc":"mysql","text":"mysql://root:rootpw@127.0.0.1:3306/mydb"}
+{"label":"DB_CONNECTION_STRING","desc":"redis","text":"REDIS=redis://default:redispassword@cache:6379"}
+{"label":"DB_CONNECTION_STRING","desc":"mssql","text":"mssql://sa:Pa$$w0rd@sql.host:1433/db"}
+{"label":"DB_CONNECTION_STRING","desc":"amqp","text":"amqp://guest:guest@rabbitmq:5672//"}

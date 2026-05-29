@@ -1,0 +1,15 @@
+{"label":"CREDIT_CARD","desc":"visa hyphenated","text":"My Visa is 4111-1111-1111-1111 please charge it"}
+{"label":"CREDIT_CARD","desc":"visa spaced","text":"Card 4111 1111 1111 1111 expires next month"}
+{"label":"CREDIT_CARD","desc":"visa solid","text":"4111111111111111 was declined"}
+{"label":"CREDIT_CARD","desc":"mastercard hyphen","text":"MC: 5555-5555-5555-4444"}
+{"label":"CREDIT_CARD","desc":"mastercard spaced","text":"MC 5500 0000 0000 0004"}
+{"label":"CREDIT_CARD","desc":"amex 15 digit","text":"AMEX 3782-822463-10005"}
+{"label":"CREDIT_CARD","desc":"amex spaces","text":"3782 822463 10005"}
+{"label":"CREDIT_CARD","desc":"discover","text":"Discover 6011 1111 1111 1117"}
+{"label":"CREDIT_CARD","desc":"jcb","text":"JCB 3530 1113 3330 0000"}
+{"label":"CREDIT_CARD","desc":"in code comment","text":"// TODO remove test card 4111-1111-1111-1111"}
+{"label":"CREDIT_CARD","desc":"in JSON","text":"{\"card\":\"4111111111111111\",\"cvv\":\"123\"}"}
+{"label":"CREDIT_CARD","desc":"in SQL","text":"INSERT INTO orders VALUES ('4111-1111-1111-1111')"}
+{"label":"CREDIT_CARD","desc":"prefix label","text":"card_number=4111-1111-1111-1111"}
+{"label":"CREDIT_CARD","desc":"two cards","text":"primary 4111111111111111 backup 5555-5555-5555-4444"}
+{"label":"CREDIT_CARD","desc":"mixed sep","text":"4111-1111 1111-1111"}

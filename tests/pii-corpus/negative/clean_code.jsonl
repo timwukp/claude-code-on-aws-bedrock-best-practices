@@ -1,0 +1,20 @@
+{"label":"CLEAN","desc":"sort fn ask","text":"Write me a sort function in Python"}
+{"label":"CLEAN","desc":"refactor ask","text":"Refactor this React component to use hooks"}
+{"label":"CLEAN","desc":"explain","text":"Explain how the event loop works in Node.js"}
+{"label":"CLEAN","desc":"fix typo","text":"Fix the typo in line 42 of main.py"}
+{"label":"CLEAN","desc":"sql query","text":"Write a SELECT query for users created last week"}
+{"label":"CLEAN","desc":"commit msg","text":"Suggest a commit message for fixing pagination bug"}
+{"label":"CLEAN","desc":"unit test","text":"Add unit tests for the parseDate utility"}
+{"label":"CLEAN","desc":"long lorem","text":"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."}
+{"label":"CLEAN","desc":"version number","text":"Bump version from 1.2.3 to 1.2.4 in package.json"}
+{"label":"CLEAN","desc":"git status ask","text":"What does git status output mean for staged files"}
+{"label":"CLEAN","desc":"docker compose","text":"Create a docker-compose.yml with postgres and redis"}
+{"label":"CLEAN","desc":"regex help","text":"Help me write a regex for matching ISO 8601 dates"}
+{"label":"CLEAN","desc":"err handling","text":"Add error handling around the file read on line 88"}
+{"label":"CLEAN","desc":"dependency","text":"Update the @types/node dependency to 20.18.0"}
+{"label":"CLEAN","desc":"comment q","text":"What does this // TODO comment mean in context"}
+{"label":"CLEAN","desc":"code 16 hex","text":"the file hash starts with deadbeef and is 16 chars"}
+{"label":"CLEAN","desc":"port number","text":"Change the listening port to 8080"}
+{"label":"CLEAN","desc":"timestamp","text":"Convert the timestamp 1716893200 to ISO format"}
+{"label":"CLEAN","desc":"version string","text":"Node.js v20.18.0 was released last quarter"}
+{"label":"CLEAN","desc":"http only","text":"http://example.com is just a placeholder"}

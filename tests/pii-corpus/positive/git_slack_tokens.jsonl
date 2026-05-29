@@ -1,0 +1,6 @@
+{"label":"GIT_TOKEN","desc":"github classic","text":"GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789"}
+{"label":"GIT_TOKEN","desc":"github in url","text":"git remote add fork https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/x/y"}
+{"label":"GIT_TOKEN","desc":"gitlab pat","text":"glpat-abcdefghij1234567890abc"}
+{"label":"SLACK_TOKEN","desc":"bot","text":"SLACK=xoxb-1234567890-abcdef-AbCdEfGhIjKlMnOpQrStUv"}
+{"label":"SLACK_TOKEN","desc":"user","text":"export SLACK_USER=xoxp-1234567890-1234567890-AbcDefGhi"}
+{"label":"SLACK_TOKEN","desc":"refresh","text":"xoxr-1234567890-AbcDef"}

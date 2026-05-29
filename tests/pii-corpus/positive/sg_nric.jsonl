@@ -1,0 +1,6 @@
+{"label":"SG_NRIC","desc":"S prefix","text":"NRIC: S1234567D"}
+{"label":"SG_NRIC","desc":"T prefix","text":"NRIC T7654321A"}
+{"label":"SG_NRIC","desc":"F prefix FIN","text":"FIN F1234567X"}
+{"label":"SG_NRIC","desc":"G prefix","text":"G9876543Q applied"}
+{"label":"SG_NRIC","desc":"M prefix","text":"M2345678P registered"}
+{"label":"SG_NRIC","desc":"in form","text":"name: John\nnric: S1234567D"}

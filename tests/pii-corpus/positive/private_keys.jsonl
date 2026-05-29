@@ -1,0 +1,7 @@
+{"label":"PRIVATE_KEY","desc":"rsa header","text":"-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBA"}
+{"label":"PRIVATE_KEY","desc":"openssh header","text":"-----BEGIN OPENSSH PRIVATE KEY-----"}
+{"label":"PRIVATE_KEY","desc":"ec header","text":"-----BEGIN EC PRIVATE KEY-----\nMHcCAQEE"}
+{"label":"PRIVATE_KEY","desc":"dsa header","text":"-----BEGIN DSA PRIVATE KEY-----"}
+{"label":"PRIVATE_KEY","desc":"plain header","text":"-----BEGIN PRIVATE KEY-----"}
+{"label":"PRIVATE_KEY","desc":"in shell","text":"echo '-----BEGIN RSA PRIVATE KEY-----' > id_rsa"}
+{"label":"PRIVATE_KEY","desc":"comment leak","text":"# pasted key: -----BEGIN OPENSSH PRIVATE KEY-----"}

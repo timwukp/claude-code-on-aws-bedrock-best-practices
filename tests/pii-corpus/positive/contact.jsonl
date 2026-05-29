@@ -1,0 +1,8 @@
+{"label":"EMAIL_ADDRESS","desc":"basic","text":"contact alice@example.com for details"}
+{"label":"EMAIL_ADDRESS","desc":"plus tag","text":"alice+tag@example.co.uk"}
+{"label":"EMAIL_ADDRESS","desc":"corporate","text":"please email john.doe@bigbank.com.sg"}
+{"label":"PHONE_INTL","desc":"sg","text":"call me at +65 9123 4567"}
+{"label":"PHONE_INTL","desc":"us","text":"+1-415-555-1234"}
+{"label":"PHONE_INTL","desc":"uk","text":"+44 20 7946 0958"}
+{"label":"PASSPORT_NUMBER","desc":"sg","text":"passport E1234567 issued 2020"}
+{"label":"PASSPORT_NUMBER","desc":"us","text":"US passport AB1234567"}

@@ -1,0 +1,5 @@
+{"label":"JWT_TOKEN","desc":"hs256 plain","text":"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"}
+{"label":"JWT_TOKEN","desc":"in json","text":"{\"token\":\"eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJleGFtcGxlIn0.AbCdEfGhIjKlMnOpQrStUv\"}"}
+{"label":"JWT_TOKEN","desc":"env","text":"JWT=eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOjF9.signature1234567890"}
+{"label":"JWT_TOKEN","desc":"curl auth","text":"curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJrIjoidiJ9.AAAAAAAAAA' api"}
+{"label":"JWT_TOKEN","desc":"multi line","text":"saved jwt=\neyJhbGciOiJIUzI1NiJ9.eyJrIjoidiJ9.AAAAAAAAAA"}

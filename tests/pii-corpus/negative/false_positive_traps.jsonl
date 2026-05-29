@@ -1,0 +1,7 @@
+{"label":"CLEAN","desc":"phone-like in code","text":"set timeout to 30000ms not 9999999"}
+{"label":"CLEAN","desc":"version 4111","text":"the npm package was at version 4.1.1 then bumped"}
+{"label":"CLEAN","desc":"uuid like","text":"order id 550e8400-e29b-41d4-a716-446655440000 was created"}
+{"label":"CLEAN","desc":"isbn","text":"ISBN-13 978-3-16-148410-0 is the book"}
+{"label":"CLEAN","desc":"binary literal","text":"const flag = 0b11111111111111111111111111111111"}
+{"label":"CLEAN","desc":"placeholder text","text":"replace XXXX-XXXX-XXXX-XXXX with real value"}
+{"label":"CLEAN","desc":"common id","text":"order #1234 customer #5678 status pending"}

@@ -1,0 +1,10 @@
+{"label":"AWS_ACCESS_KEY","desc":"plain","text":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}
+{"label":"AWS_ACCESS_KEY","desc":"in code","text":"const key = 'AKIAIOSFODNN7EXAMPLE'"}
+{"label":"AWS_ACCESS_KEY","desc":"yaml","text":"aws:\n  access_key: AKIAIOSFODNN7EXAMPLE"}
+{"label":"AWS_ACCESS_KEY","desc":"env line","text":"export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}
+{"label":"AWS_ACCESS_KEY","desc":"comment","text":"# old key was AKIAIOSFODNN7EXAMPLE"}
+{"label":"AWS_SECRET_KEY","desc":"quoted secret","text":"secret='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"}
+{"label":"AWS_SECRET_KEY","desc":"double quoted","text":"SECRET=\"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\""}
+{"label":"AWS_ACCESS_KEY","desc":"in url-like","text":"endpoint?key=AKIAIOSFODNN7EXAMPLE&sig=..."}
+{"label":"AWS_ACCESS_KEY","desc":"prod env","text":"AKIAIOSFODNN7EXAMPLE is the new prod key"}
+{"label":"AWS_ACCESS_KEY","desc":"json","text":"{\"AccessKeyId\":\"AKIAIOSFODNN7EXAMPLE\"}"}

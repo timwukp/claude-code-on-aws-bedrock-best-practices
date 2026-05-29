@@ -1,0 +1,7 @@
+{"label":"API_KEY_ASSIGNMENT","desc":"api_key=","text":"api_key=ABCDEFGHIJ1234567890klmnopqrst"}
+{"label":"API_KEY_ASSIGNMENT","desc":"api-key:","text":"api-key: ABCDEFGHIJ1234567890klmnopqrst"}
+{"label":"API_KEY_ASSIGNMENT","desc":"apikey","text":"apikey=ABCDEFGHIJ1234567890klmnopqrst"}
+{"label":"API_KEY_ASSIGNMENT","desc":"access_token","text":"access_token=ABCDEFGHIJ1234567890klmnopqrst"}
+{"label":"API_KEY_ASSIGNMENT","desc":"auth_token quoted","text":"auth_token=\"ABCDEFGHIJ1234567890klmnopqrst\""}
+{"label":"API_KEY_ASSIGNMENT","desc":"secret_key","text":"secret_key: 'verylongsecretkey1234567890ABC'"}
+{"label":"API_KEY_ASSIGNMENT","desc":"api_secret","text":"api_secret=verylongsecretkey1234567890ABC"}
