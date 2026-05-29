@@ -13,6 +13,10 @@
     "ANTHROPIC_MODEL": "us.anthropic.claude-sonnet-4-6",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 
+    // Model alias control — override which model resolves for "sonnet" / "opus":
+    // "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
+    // "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-8",
+
     // VPC Endpoint URL (replace with your VPCE DNS or regional endpoint)
     "ANTHROPIC_BEDROCK_BASE_URL": "https://bedrock-runtime.us-east-1.amazonaws.com",
 
@@ -28,6 +32,10 @@
 
     // [TESTED ✅] Blocks `claude update` with "Updates are disabled by your administrator"
     "DISABLE_UPDATES": "1",
+    // DISABLE_AUTOUPDATER (v2.1.118+): separately blocks background auto-update
+    // checks. Set both for complete update control. In managed deployments, set
+    // these in managed-settings.json instead (they cannot be overridden there).
+    "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 
     // Timeouts (stricter than defaults)
