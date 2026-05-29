@@ -1,0 +1,11 @@
+# /etc/sudoers.d/claude-code — drop-in for tightened wrapper deploy
+# Validate before installing:
+#   sudo visudo -cf scripts/sudoers-claude-code
+# Install:
+#   sudo install -m 0440 -o root -g root scripts/sudoers-claude-code /etc/sudoers.d/claude-code
+#
+# Members of claude-users may run the real binary ONLY through this exact path
+# (no flag substitution, no env passthrough — wrapper sets env explicitly).
+
+Defaults!/opt/claude-code/bin/claude env_reset, secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+%claude-users ALL=(root) NOPASSWD: /opt/claude-code/bin/claude
