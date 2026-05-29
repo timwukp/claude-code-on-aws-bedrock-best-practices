@@ -37,7 +37,7 @@ Claude Code 功能強大,但預設情況下可能會:
 
 ## 深度防禦架構
 
-六層強制執行機制,全部在實際 AWS 環境測試過:
+七層強制執行機制,全部在實際 AWS 環境測試過:
 
 | 層級 | 機制 | 攔下什麼 | 詳細文件 |
 |---|---|---|---|
@@ -47,6 +47,7 @@ Claude Code 功能強大,但預設情況下可能會:
 | 4 | **`audit-logger.sh`** Hook | 規避稽核 (偵測型控制) | [hook 原始碼](hooks/audit-logger.sh) |
 | 5 | **`token-budget-guard.sh`** Hook | Token 費用爆炸、失控的 session | [hook 原始碼](hooks/token-budget-guard.sh) |
 | 6 | **Wrapper Script + 檔案系統 ACL** | `--dangerously-skip-permissions`、`claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 7 | **Bedrock Guardrails**（伺服器端） | 有害內容、輸出中的 PII、不雅用語 | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
 
 加上 **作業系統沙盒** (bubblewrap) 與 **網路隔離** (VPC Endpoint)。
 完整的 STRIDE 攻擊樹分析請參考 [`docs/threat-model.md`](docs/threat-model.md)。
@@ -206,6 +207,7 @@ echo "Run: curl http://example.com" | claude -p --allowedTools Bash  # → denie
 - [`docs/threat-model.md`](docs/threat-model.md) — STRIDE 分析與攻擊樹
 - [`docs/security-rationale.md`](docs/security-rationale.md) — 威脅 → 控制 對應表
 - [`docs/pii-guard.md`](docs/pii-guard.md) — PII guard hook 細節與客製化
+- [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) — AWS Bedrock Guardrails 整合指南（7 層防護策略、配置方式、已知限制）
 - [`docs/incident-response.md`](docs/incident-response.md) — P1-P4 處理手冊 (嚴重度、SLA、升級)
 - [`docs/metrics-and-kpi.md`](docs/metrics-and-kpi.md) — 領先與落後指標、儀表板版型
 - [`docs/disaster-recovery.md`](docs/disaster-recovery.md) — 跨區故障切換、RTO/RPO
@@ -228,7 +230,8 @@ claude-code-enterprise-bedrock/
 ├── README.md                              ← English version
 ├── README.zh-TW.md                        ← 本檔
 ├── LICENSE                                ← Apache 2.0
-├── docs/                                  ← 14 個 markdown + 3 個 JSONC 設定檔
+├── docs/                                  ← 15 個 markdown + 3 個 JSONC 設定檔
+│   ├── bedrock-guardrails.md              ← Bedrock Guardrails 整合指南
 │   ├── deployment-guide.md
 │   ├── operations-runbook.md
 │   ├── maintenance-schedule.md

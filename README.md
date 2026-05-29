@@ -39,7 +39,7 @@ breaking developer productivity.
 
 ## Defense-in-Depth Architecture
 
-Six enforcement layers, all tested on real AWS infrastructure:
+Seven enforcement layers, all tested on real AWS infrastructure:
 
 | Layer | Mechanism | Stops | Where to read |
 |---|---|---|---|
@@ -49,6 +49,7 @@ Six enforcement layers, all tested on real AWS infrastructure:
 | 4 | **`audit-logger.sh`** hook | Audit evasion (detective control) | [hook source](hooks/audit-logger.sh) |
 | 5 | **`token-budget-guard.sh`** hook | Token cost explosion, runaway sessions | [hook source](hooks/token-budget-guard.sh) |
 | 6 | **Wrapper script + filesystem ACL** | `--dangerously-skip-permissions`, `claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 7 | **Bedrock Guardrails** (server-side) | Harmful content, PII in output, profanity | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
 
 Plus **OS sandbox** (bubblewrap) and **network isolation** (VPC Endpoint).
 See [`docs/threat-model.md`](docs/threat-model.md) for a STRIDE-based attack tree analysis.
@@ -209,6 +210,7 @@ Documents are grouped by audience and use case:
 - [`docs/threat-model.md`](docs/threat-model.md) — STRIDE analysis with attack trees
 - [`docs/security-rationale.md`](docs/security-rationale.md) — Threat → control mapping
 - [`docs/pii-guard.md`](docs/pii-guard.md) — PII guard hook details and customization
+- [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) — AWS Bedrock Guardrails integration guide (7 protection policies, configuration, known limitations)
 - [`docs/incident-response.md`](docs/incident-response.md) — P1-P4 playbook with severity, SLA, escalation
 - [`docs/metrics-and-kpi.md`](docs/metrics-and-kpi.md) — Leading and lagging indicators, dashboard layout
 - [`docs/disaster-recovery.md`](docs/disaster-recovery.md) — Multi-region failover, RTO/RPO
@@ -231,7 +233,8 @@ claude-code-enterprise-bedrock/
 ├── README.md                              ← this file
 ├── README.zh-TW.md                        ← 繁體中文版
 ├── LICENSE                                ← Apache 2.0
-├── docs/                                  ← 14 markdown + 3 JSONC config files
+├── docs/                                  ← 15 markdown + 3 JSONC config files
+│   ├── bedrock-guardrails.md              ← Bedrock Guardrails integration guide
 │   ├── deployment-guide.md
 │   ├── operations-runbook.md
 │   ├── maintenance-schedule.md
