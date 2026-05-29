@@ -231,8 +231,10 @@ runs in the background and does not block the session.
 "awsAuthRefresh": "/usr/local/bin/aws-auth-refresh.sh"
 ```
 
-> **Security note:** These scripts run with the user's permissions. Ensure they
-> are root-owned and not writable by the developer to prevent credential injection attacks.
+> **Security note:** These scripts execute as the invoking user but should be
+> root-owned (0755) to prevent tampering. Root ownership ensures a developer
+> cannot modify the script to inject arbitrary credential values or redirect
+> credential output.
 
 ### Version Requirements
 

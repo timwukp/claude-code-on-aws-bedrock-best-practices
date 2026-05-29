@@ -78,7 +78,7 @@ they expand the attack surface beyond what is acceptable in regulated environmen
 | Auto Mode | `disableAutoMode: "disable"` | Auto Mode executes tools without per-tool user confirmation. While convenient, it removes the human-in-the-loop check that catches AI hallucinations before they cause damage. In regulated environments, every tool execution should have explicit or policy-based approval. |
 | Agent View | `disableAgentView: true` | Restricts advanced agent features that may bypass standard permission flows. |
 | Deep Link Registration | `disableDeepLinkRegistration: true` | Prevents URL handlers that could be used to trigger Claude Code actions from web pages (potential for drive-by attacks). |
-| Plugin Marketplaces | `blockedMarketplaces: ["*"]` | Third-party plugins execute arbitrary code. Until an enterprise plugin vetting process is established, all marketplace installations should be blocked. |
+| Plugin Marketplaces | `blockedMarketplaces: ["*"]` | Third-party plugins execute arbitrary code. Until an enterprise plugin vetting process is established, all marketplace installations should be blocked. (must be explicitly enabled in managed-settings.jsonc - commented out by default for operator customization) |
 
 ## Compliance Mapping
 

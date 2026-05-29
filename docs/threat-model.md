@@ -140,7 +140,7 @@ GOAL: Use Claude Code without enforcement
 ├── 8. Enable Auto Mode for unsupervised execution
 │   └── BLOCKED by disableAutoMode: "disable" ✓
 └── 9. Install malicious plugin from marketplace
-    └── BLOCKED by blockedMarketplaces + strictKnownMarketplaces ✓
+    └── BLOCKED by blockedMarketplaces + strictKnownMarketplaces (requires uncommenting in managed-settings.jsonc) ✓
 ```
 
 ## Residual Risks

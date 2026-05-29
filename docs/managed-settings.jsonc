@@ -138,6 +138,7 @@
   "deniedMcpServers": ["*"],
 
   // --- Plugin / Marketplace controls (v2.1.130+) ---
+  // [ACTION REQUIRED] Uncomment the lines below to enforce plugin marketplace blocking.
   // Blocks installation of plugins from untrusted sources.
   // "blockedMarketplaces": ["*"],          // deny all marketplace installs
   // "strictKnownMarketplaces": true,       // only allow vetted marketplace sources
@@ -183,7 +184,7 @@
           }
         ]
       }
-    ]
+    ],
     // --- Session lifecycle hooks (for audit completeness) ---
     // SessionStart and SessionEnd fire at session boundaries.
     // Useful for login/logout auditing and resource tracking.
@@ -230,6 +231,10 @@
     // Model alias control (override which model resolves for "sonnet" / "opus"):
     // "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
     // "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-8",
+
+    // AWS credential refresh for long-running sessions:
+    // "awsCredentialExport": "/usr/local/bin/refresh-aws-creds.sh",  // v1.0.53+
+    // "awsAuthRefresh": "/usr/local/bin/aws-auth-refresh.sh",        // v2.1.141+
 
     // git-guard configuration (customize per enterprise)
     "GIT_GUARD_ALLOWED_DOMAINS": "gitlab.yourcompany.com,*.internal.yourcompany.com",
