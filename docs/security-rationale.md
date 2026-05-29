@@ -34,6 +34,9 @@ This document maps threats to controls for CISO, IT Security, Compliance, and au
 | **Sandbox escape** | Missing runtime | bubblewrap absent → unsandboxed | OS controls bypassed | `sandbox.failIfUnavailable` |
 | **Cost explosion** | Infinite loop | Agent processes massive files or loops | Unexpected Bedrock bill | `BASH_MAX_TIMEOUT_MS` + AWS budgets |
 | **Shadow AI** | Unauthorized install | Developer installs Claude Code without IT | No controls applied | MDM + managed settings |
+| **Security bypass (Remote Control)** | External session hijack | Attacker process uses Remote Control API to send commands to active session | Complete session takeover | `disableRemoteControl: true` |
+| **Security bypass (Auto Mode)** | Unsupervised tool execution | Auto Mode allows rapid chained tool calls without user approval | Unchecked destructive actions | `disableAutoMode: "disable"` in permissions |
+| **Supply chain (plugins)** | Malicious marketplace plugin | Plugin from untrusted source executes arbitrary code | Code execution, data theft | `blockedMarketplaces`, `strictKnownMarketplaces` |
 
 ## Defense-in-Depth Layers
 
@@ -51,6 +54,7 @@ This document maps threats to controls for CISO, IT Security, Compliance, and au
 | 10 | Bedrock Guardrails | Model output filtering | Yes (server-side) |
 | 11 | AWS IAM (least privilege) | Cloud resource abuse | Yes |
 | 12 | MDM/endpoint management | Shadow AI installations | Yes |
+| 13 | Feature restrictions (managed) | Remote Control hijack, Auto Mode abuse, plugin attacks | Yes |
 
 ## Residual Risks (not fully mitigated by this kit)
 
@@ -62,6 +66,19 @@ This document maps threats to controls for CISO, IT Security, Compliance, and au
 | Insider threat (developer with root access) | Root can disable all controls | Separation of duties + privileged access management (PAM) |
 | Zero-day in Claude Code binary | Unknown vulnerability | Version pinning + rapid patching process + network isolation |
 | Token cost abuse (within timeout limits) | Timeout limits cost but don't eliminate it | AWS Bedrock budget alerts + per-user quotas via IAM |
+
+## Enterprise Feature Restriction Rationale
+
+Several Claude Code features are disabled in this kit's managed settings because
+they expand the attack surface beyond what is acceptable in regulated environments:
+
+| Feature Disabled | Setting | Why |
+|---|---|---|
+| Remote Control | `disableRemoteControl: true` | Prevents external processes from sending commands to a Claude Code session. In an enterprise context, this eliminates the risk of a co-resident malicious process hijacking a developer's active session. |
+| Auto Mode | `disableAutoMode: "disable"` | Auto Mode executes tools without per-tool user confirmation. While convenient, it removes the human-in-the-loop check that catches AI hallucinations before they cause damage. In regulated environments, every tool execution should have explicit or policy-based approval. |
+| Agent View | `disableAgentView: true` | Restricts advanced agent features that may bypass standard permission flows. |
+| Deep Link Registration | `disableDeepLinkRegistration: true` | Prevents URL handlers that could be used to trigger Claude Code actions from web pages (potential for drive-by attacks). |
+| Plugin Marketplaces | `blockedMarketplaces: ["*"]` | Third-party plugins execute arbitrary code. Until an enterprise plugin vetting process is established, all marketplace installations should be blocked. (must be explicitly enabled in managed-settings.jsonc - commented out by default for operator customization) |
 
 ## Compliance Mapping
 

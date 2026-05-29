@@ -15,12 +15,23 @@ developer workstation or CI/CD runner in a regulated enterprise environment.
 ### 1. Install Claude Code
 
 ```bash
-# Linux/macOS
-npm install -g @anthropic-ai/claude-code
+# Linux/macOS (recommended)
+curl -fsSL https://claude.ai/install.sh | bash
 
-# Windows (PowerShell as Admin)
-npm install -g @anthropic-ai/claude-code
+# macOS (Homebrew alternative)
+brew install --cask claude-code
+
+# Windows (recommended — PowerShell as Admin)
+irm https://claude.ai/install.ps1 | iex
+
+# Windows (WinGet alternative)
+winget install Anthropic.ClaudeCode
+
+# Deprecated fallback (still works but not recommended)
+# npm install -g @anthropic-ai/claude-code
 ```
+
+> **Note:** Installation via npm is deprecated as of 2025. The methods above are officially recommended by Anthropic.
 
 ### 2. Install Sandbox Dependencies (Linux only)
 
@@ -146,9 +157,12 @@ sudo chmod 0644 /etc/claude-code/managed-settings.json
 
 ```powershell
 # Windows
-Copy-Item docs\managed-settings.jsonc "C:\ProgramData\ClaudeCode\managed-settings.json"
-icacls "C:\ProgramData\ClaudeCode\managed-settings.json" /inheritance:r /grant "BUILTIN\Administrators:(F)" /grant "BUILTIN\Users:(R)"
+New-Item -ItemType Directory -Path "C:\Program Files\ClaudeCode" -Force
+Copy-Item docs\managed-settings.jsonc "C:\Program Files\ClaudeCode\managed-settings.json"
+icacls "C:\Program Files\ClaudeCode\managed-settings.json" /inheritance:r /grant "BUILTIN\Administrators:(F)" /grant "BUILTIN\Users:(R)"
 ```
+
+> **Breaking change (v2.1.75):** The Windows managed settings path changed from `C:\ProgramData\ClaudeCode\` to `C:\Program Files\ClaudeCode\`. The old path is no longer read.
 
 ### 8. Validate Deployment
 
@@ -197,6 +211,47 @@ If your AWS account has SSM Quick Setup enabled, it may auto-replace the IAM
 instance profile on EC2 instances. Either:
 - Exclude Claude Code instances from Quick Setup
 - Add Bedrock permissions to the `AmazonSSMRoleForInstancesQuickSetup` role
+
+### 10. (Optional) Configure AWS Credential Helpers
+
+For long-running Claude Code sessions, AWS credentials may expire. Claude Code
+provides two mechanisms for credential refresh:
+
+**`awsCredentialExport`** (v1.0.53+): A shell command that Claude Code runs to
+export fresh AWS credentials. The command should output environment variable
+assignments (e.g., `export AWS_ACCESS_KEY_ID=...`).
+
+**`awsAuthRefresh`** (v2.1.141+): A shell command that Claude Code runs
+periodically to refresh authentication. Unlike `awsCredentialExport`, this
+runs in the background and does not block the session.
+
+```bash
+# Example: in managed-settings.json env block
+"awsCredentialExport": "/usr/local/bin/refresh-aws-creds.sh",
+"awsAuthRefresh": "/usr/local/bin/aws-auth-refresh.sh"
+```
+
+> **Security note:** These scripts execute as the invoking user but should be
+> root-owned (0755) to prevent tampering. Root ownership ensures a developer
+> cannot modify the script to inject arbitrary credential values or redirect
+> credential output.
+
+### Version Requirements
+
+Some features in this kit require specific minimum versions of Claude Code.
+Deploying on older versions may result in settings being silently ignored.
+
+| Feature | Minimum Version | Notes |
+|---|---|---|
+| `managed-settings.d/` directory | v2.1.83+ | Allows splitting managed settings into multiple files |
+| `sandbox.network.deniedDomains` | v2.1.113+ | Explicit domain deny list for sandbox networking |
+| `DISABLE_AUTOUPDATER` env var | v2.1.118+ | Separate from `DISABLE_UPDATES`; blocks background checks |
+| `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ | Controls Bedrock service tier selection |
+| `awsAuthRefresh` | v2.1.141+ | Background credential refresh |
+| Opus 4.8 model support | v2.1.154+ | Required for `ANTHROPIC_DEFAULT_OPUS_MODEL` with Opus 4.8 |
+
+> **Recommendation:** Pin to v2.1.118+ or newer to ensure all security features
+> in this kit are honored. Use `claude --version` to verify the deployed version.
 
 ## Maintenance
 

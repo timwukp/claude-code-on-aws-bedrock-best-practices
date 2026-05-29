@@ -321,3 +321,40 @@ equivalent protection to Linux `chattr +i`.
 | `chflags uchg` blocks `tee` | ✅ |
 | `chflags uchg` removable by user without sudo | ⚠ Yes (use `schg` instead) |
 | `sudo chflags schg` blocks user `chflags noschg` | ✅ |
+
+---
+
+## Issue 12: Minimum Version Requirements for Features in This Kit
+
+**Affected platform:** All
+**Discovered:** 2026-05-30
+
+### Background
+
+Several features and settings used in this kit were introduced in specific
+Claude Code versions. Deploying the managed-settings.json from this kit on
+an older Claude Code version may result in those settings being **silently
+ignored** without any error or warning.
+
+### Feature / Version Matrix
+
+| Feature / Setting | Minimum Version | Impact if Missing |
+|---|---|---|
+| macOS plist managed settings | v2.1.51+ | macOS managed settings not read |
+| `managed-settings.d/` directory | v2.1.83+ | Directory-based config not merged |
+| `sandbox.failIfUnavailable` CVE fix | v2.1.78+ | Sandbox may be silently disabled |
+| `sandbox.network.deniedDomains` | v2.1.113+ | Denied domains list ignored |
+| `DISABLE_AUTOUPDATER` env var | v2.1.118+ | Background updates still run |
+| `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ | Service tier setting ignored |
+| Plugin marketplace controls | v2.1.130+ | Plugin restrictions not enforced |
+| `awsAuthRefresh` | v2.1.141+ | Credential refresh not available |
+| Opus 4.8 model support | v2.1.154+ | Model alias may fail |
+
+### Recommendation
+
+1. **Pin minimum version:** Enforce v2.1.118+ as a floor via your package
+   management system. This covers the most critical security features.
+2. **Version check on deploy:** Add `claude --version` to your golden image
+   validation script and fail if below the required minimum.
+3. **Do not rely on `minimumVersion` setting:** As documented in Issue 5,
+   this setting has no observable enforcement effect.

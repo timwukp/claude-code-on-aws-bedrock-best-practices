@@ -5,7 +5,17 @@
   // Deploy at:
   //   Linux:   /etc/claude-code/managed-settings.json
   //   macOS:   /Library/Application Support/ClaudeCode/managed-settings.json
-  //   Windows: C:\ProgramData\ClaudeCode\managed-settings.json
+  //   Windows: C:\Program Files\ClaudeCode\managed-settings.json
+  //   (Changed in v2.1.75 — the old C:\ProgramData path is no longer read)
+  //
+  // Directory-based deployment (v2.1.83+):
+  //   Linux:   /etc/claude-code/managed-settings.d/*.json
+  //   macOS:   /Library/Application Support/ClaudeCode/managed-settings.d/*.json
+  //   Windows: C:\Program Files\ClaudeCode\managed-settings.d\*.json
+  //
+  // Files in managed-settings.d/ are merged alphabetically on top of the base
+  // managed-settings.json. Useful for modular deployment (e.g., separate hook
+  // config from deny rules via SSM/Puppet/Chef).
   //
   // Ownership: root:root 0644 (Linux/macOS) or Administrators:Full (Windows)
   // Users CANNOT modify this file.
@@ -23,6 +33,10 @@
   // to force WSL2, or omit the sandbox block in Windows managed settings.
   "sandbox": {
     "enabled": true,
+    // [SECURITY-CRITICAL] In versions before v2.1.78, a bug (CVE-level severity)
+    // allowed the sandbox to be silently disabled when bubblewrap was missing.
+    // With failIfUnavailable: true, Claude Code refuses to start rather than
+    // running unsandboxed. Always set this to true in enterprise deployments.
     "failIfUnavailable": true,
     "allowUnsandboxedCommands": false,
     "filesystem": {
@@ -123,6 +137,12 @@
   "allowedMcpServers": [],
   "deniedMcpServers": ["*"],
 
+  // --- Plugin / Marketplace controls (v2.1.130+) ---
+  // [ACTION REQUIRED] Uncomment the lines below to enforce plugin marketplace blocking.
+  // Blocks installation of plugins from untrusted sources.
+  // "blockedMarketplaces": ["*"],          // deny all marketplace installs
+  // "strictKnownMarketplaces": true,       // only allow vetted marketplace sources
+
   // --- Hooks (audit + policy enforcement) ---
   // ALL three hooks are deployed:
   //   1. git-guard.sh    — enterprise git policy (allowlist, branch protection)
@@ -164,17 +184,57 @@
           }
         ]
       }
-    ]
+    ],
+    // --- Session lifecycle hooks (for audit completeness) ---
+    // SessionStart and SessionEnd fire at session boundaries.
+    // Useful for login/logout auditing and resource tracking.
+    // "SessionStart": [
+    //   {
+    //     "hooks": [
+    //       {
+    //         "type": "command",
+    //         "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh"
+    //       }
+    //     ]
+    //   }
+    // ],
+    // "SessionEnd": [
+    //   {
+    //     "hooks": [
+    //       {
+    //         "type": "command",
+    //         "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh"
+    //       }
+    //     ]
+    //   }
+    // ]
   },
 
   // --- Environment variables ---
   "env": {
     "CLAUDE_CODE_USE_BEDROCK": "1",
     "AWS_REGION": "us-east-1",
+    // Note: DISABLE_UPDATES blocks the `claude update` command.
+    // DISABLE_AUTOUPDATER (v2.1.118+) separately blocks background auto-update checks.
+    // Set both for complete update control in enterprise:
     "DISABLE_UPDATES": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    // Scope: blocks telemetry, update checks, marketplace browsing,
+    // and any non-essential outbound network connections.
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "BASH_DEFAULT_TIMEOUT_MS": "30000",
     "BASH_MAX_TIMEOUT_MS": "120000",
+
+    // Bedrock service tier (v2.1.122+) — controls priority/throughput tier
+    // "ANTHROPIC_BEDROCK_SERVICE_TIER": "standard",
+
+    // Model alias control (override which model resolves for "sonnet" / "opus"):
+    // "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
+    // "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-8",
+
+    // AWS credential refresh for long-running sessions:
+    // "awsCredentialExport": "/usr/local/bin/refresh-aws-creds.sh",  // v1.0.53+
+    // "awsAuthRefresh": "/usr/local/bin/aws-auth-refresh.sh",        // v2.1.141+
 
     // git-guard configuration (customize per enterprise)
     "GIT_GUARD_ALLOWED_DOMAINS": "gitlab.yourcompany.com,*.internal.yourcompany.com",

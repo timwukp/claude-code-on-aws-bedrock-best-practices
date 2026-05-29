@@ -39,7 +39,7 @@ breaking developer productivity.
 
 ## Defense-in-Depth Architecture
 
-Five enforcement layers, all tested on real AWS infrastructure:
+Six enforcement layers, all tested on real AWS infrastructure:
 
 | Layer | Mechanism | Stops | Where to read |
 |---|---|---|---|
@@ -47,7 +47,8 @@ Five enforcement layers, all tested on real AWS infrastructure:
 | 2 | **`pii-guard.sh`** hook | Sensitive data in prompts and tool inputs | [`docs/pii-guard.md`](docs/pii-guard.md) |
 | 3 | **`git-guard.sh`** hook | Unauthorized git push, branch violations, force-push | [hook source](hooks/git-guard.sh) |
 | 4 | **`audit-logger.sh`** hook | Audit evasion (detective control) | [hook source](hooks/audit-logger.sh) |
-| 5 | **Wrapper script + filesystem ACL** | `--dangerously-skip-permissions`, `claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 5 | **`token-budget-guard.sh`** hook | Token cost explosion, runaway sessions | [hook source](hooks/token-budget-guard.sh) |
+| 6 | **Wrapper script + filesystem ACL** | `--dangerously-skip-permissions`, `claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
 
 Plus **OS sandbox** (bubblewrap) and **network isolation** (VPC Endpoint).
 See [`docs/threat-model.md`](docs/threat-model.md) for a STRIDE-based attack tree analysis.
@@ -59,7 +60,7 @@ deny rules cannot be removed by lower levels:
 
 | Level | Path | Owner | Tested |
 |---|---|---|---|
-| 1. Enterprise Managed (highest) | `/etc/claude-code/managed-settings.json` (Linux)<br>`C:\ProgramData\ClaudeCode\managed-settings.json` (Win) | root / Administrators | ✅ |
+| 1. Enterprise Managed (highest) | `/etc/claude-code/managed-settings.json` (Linux)<br>`C:\Program Files\ClaudeCode\managed-settings.json` (Win) | root / Administrators | ✅ |
 | 2. User Settings | `~/.claude/settings.json` | the developer | ✅ |
 | 3. Project Settings (shareable) | `.claude/settings.json` (in repo) | the team | (same format as L2) |
 | 4. Local Project Overrides | `.claude/settings.local.json` (gitignored) | the developer | (same format) |
@@ -80,6 +81,15 @@ This kit ships configs for Levels 1 and 2:
 ## Quick Start (Linux/macOS, 5 minutes)
 
 ```bash
+# 0. Install Claude Code
+# Recommended:
+curl -fsSL https://claude.ai/install.sh | bash          # macOS / Linux
+# Alternatives:
+# brew install --cask claude-code                       # Homebrew
+# irm https://claude.ai/install.ps1 | iex              # Windows (PowerShell)
+# winget install Anthropic.ClaudeCode                   # Windows (winget)
+# npm install -g @anthropic-ai/claude-code              # deprecated fallback
+
 # 1. Install dependencies
 sudo dnf install -y bubblewrap socat jq    # or: apt install ...
 
@@ -254,7 +264,7 @@ claude-code-enterprise-bedrock/
 
 | Component | Version |
 |---|---|
-| Claude Code | 2.1.150, 2.1.152 |
+| Claude Code | 2.1.150, 2.1.152, 2.1.156 |
 | Linux | Amazon Linux 2023 (EC2 t3.medium) |
 | Windows | Windows Server 2022 (EC2 t3.medium) |
 | Node.js | 20.18.0, 20.20.2 LTS |
@@ -262,6 +272,17 @@ claude-code-enterprise-bedrock/
 | AWS Bedrock | us-east-1 via VPC Endpoint (private DNS) |
 | Sandbox | bubblewrap 0.10.0 + socat 1.7.4.2 (Linux) |
 | Models | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+
+### Minimum Version Requirements
+
+Some features in this kit require specific Claude Code versions:
+
+| Feature | Minimum Version |
+|---|---|
+| `sandbox.network.deniedDomains` | v2.1.113+ |
+| `managed-settings.d/` directory support | v2.1.83+ |
+| `DISABLE_AUTOUPDATER` env var | v2.1.118+ |
+| `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ |
 
 ## License & Contributing
 

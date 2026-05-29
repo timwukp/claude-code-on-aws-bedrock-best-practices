@@ -89,6 +89,9 @@ Structured threat analysis using Microsoft's STRIDE framework, mapped to control
 | MCP server with elevated privileges | Code execution | claude mcp add server with sudo capability | chattr +i + allowManagedMcpServersOnly |
 | Bedrock IAM role over-privileged | AWS resources | Role has `*:*` permissions | Least privilege: only InvokeModel + InvokeModelWithResponseStream |
 | Sandbox escape via bubblewrap CVE | OS root | Known bwrap exploit | Patch promptly; isolate Claude Code to dedicated VMs/containers if high risk |
+| Remote Control API exploitation | Session control | External process sends commands to Claude Code via Remote Control API | `disableRemoteControl: true` in managed settings (set in this kit) |
+| Auto Mode bypasses interactive approval | All tool controls | Auto Mode executes tools without per-tool user confirmation, allowing rapid chained attacks | `disableAutoMode: "disable"` in managed settings permissions block |
+| Malicious plugin/marketplace install | Code execution | Plugin from untrusted marketplace executes arbitrary code in session context | `blockedMarketplaces: ["*"]` + `strictKnownMarketplaces: true` + `allowManagedMcpServersOnly` |
 
 ## Attack Trees (high-priority threats)
 
@@ -129,9 +132,15 @@ GOAL: Use Claude Code without enforcement
 ├── 5. Run /opt/claude-code/bin/claude directly (bypass wrapper)
 │   └── PARTIAL: deny rules still enforced; managed-settings still loaded
 │   └── REMEDIATION: restrict /opt/claude-code/bin/ to mode 0700 root:root + sudo wrapper
-└── 6. Install own copy of Claude Code in user home
-    └── PARTIAL: own settings.json is read but managed settings still merged (highest priority)
-    └── REMEDIATION: MDM/endpoint detection of unauthorized installs
+├── 6. Install own copy of Claude Code in user home
+│   └── PARTIAL: own settings.json is read but managed settings still merged (highest priority)
+│   └── REMEDIATION: MDM/endpoint detection of unauthorized installs
+├── 7. Use Remote Control API to inject commands
+│   └── BLOCKED by disableRemoteControl: true ✓
+├── 8. Enable Auto Mode for unsupervised execution
+│   └── BLOCKED by disableAutoMode: "disable" ✓
+└── 9. Install malicious plugin from marketplace
+    └── BLOCKED by blockedMarketplaces + strictKnownMarketplaces (requires uncommenting in managed-settings.jsonc) ✓
 ```
 
 ## Residual Risks
