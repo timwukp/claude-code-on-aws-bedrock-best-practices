@@ -23,12 +23,14 @@ credentials.json
 secrets.yaml
 secrets.yml
 
-# Test artifacts (regenerated locally; may contain hostname/paths)
+# Test artifacts (regenerated locally; may contain hostname/paths/account ids)
 test-run/
 tests/results/
+tests/aws-guardrails/results/
 
 # Local Claude Code session state (machine-specific)
 .claude/
 
 # Local Python venv used for HCL validation
 .venv/
+__pycache__/
