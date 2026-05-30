@@ -238,7 +238,7 @@ exit 2 and the user is told to start a fresh session.
 | Word Filters | ✅ Works | Custom + AWS-managed profanity |
 | Sensitive Information Filters | ⚠️ US-centric | Local pii-guard.sh complements (NRIC, intl phone, etc.) |
 | Contextual Grounding | ⚠️ Conditional | **Errors any request without `grounding_source`** — DO NOT enable for general code-gen |
-| Streaming intervention UX | ⚠️ Gotcha | Returns `BLOCKED_INPUT_BY_GUARDRAIL` as a normal text delta; customise `blockedInputMessaging` |
+| Streaming intervention UX | ⚠️ Gotcha | Returns `blockedInputMessaging` (default `BLOCKED_INPUT_BY_GUARDRAIL`) as a normal text delta — Claude Code renders it as model output. **Customise** to a non-model prefix (max 500 chars, verified verbatim, see [`docs/bedrock-guardrails.md#streaming-ux-gotcha-read-this`](docs/bedrock-guardrails.md#streaming-ux-gotcha-read-this)) |
 
 Reproducible tests: [`tests/aws-guardrails/`](tests/aws-guardrails/).
 Full evidence: [`docs/bedrock-guardrails-test-evidence.md`](docs/bedrock-guardrails-test-evidence.md).

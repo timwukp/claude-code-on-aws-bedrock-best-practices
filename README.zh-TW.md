@@ -232,7 +232,7 @@ exit 2,使用者必須開新 session。
 | Word Filters | ✅ 可用 | 自訂 + AWS 內建髒話清單 |
 | Sensitive Information Filters | ⚠️ 美國中心 | 本機 pii-guard.sh 補(NRIC、國際電話等) |
 | Contextual Grounding | ⚠️ 條件性 | **沒帶 `grounding_source` 的請求會直接 error** —— 一般 code-gen 不要啟用 |
-| Streaming intervention UX | ⚠️ 陷阱 | 把 `BLOCKED_INPUT_BY_GUARDRAIL` 當一般文字 delta 回傳;請自訂 `blockedInputMessaging` |
+| Streaming intervention UX | ⚠️ 陷阱 | 把 `blockedInputMessaging`(預設 `BLOCKED_INPUT_BY_GUARDRAIL`)當一般文字 delta 回傳 —— Claude Code 會當模型輸出顯示。**請自訂**為明顯非模型風格的字串(上限 500 字元,已驗證 verbatim,見 [`docs/bedrock-guardrails.md#streaming-ux-gotcha-read-this`](docs/bedrock-guardrails.md#streaming-ux-gotcha-read-this)) |
 
 可重現測試:[`tests/aws-guardrails/`](tests/aws-guardrails/)。
 完整證據:[`docs/bedrock-guardrails-test-evidence.md`](docs/bedrock-guardrails-test-evidence.md)。
