@@ -4,7 +4,7 @@ Server-side content filtering and policy enforcement for Claude Code running on
 Amazon Bedrock. Guardrails operate at the API layer -- they apply regardless of
 client configuration, local hook bypasses, or `--print` mode gaps.
 
-> **Verification update (2026-05-29).** Several claims in earlier drafts of
+> **Verification update (2026-05-30).** Several claims in earlier drafts of
 > this document have been revised based on live testing in
 > us-east-1 against Claude Haiku 4.5 / Sonnet 4.6 with a fully-configured
 > guardrail. Reproducible scripts and per-test evidence are in
@@ -15,7 +15,8 @@ client configuration, local hook bypasses, or `--print` mode gaps.
 >   was based on a separate legacy mechanism.
 > - **`InvocationsBlocked` metric does not exist.** Use `InvocationsIntervened`.
 > - **Streaming intervention does NOT raise an error**; it returns the
->   `blockedInputMessaging` text as a normal stream delta.
+>   `blockedInputMessaging` text as a normal stream delta. **Customise the
+>   message** — see the dedicated section below for verified examples.
 
 ## Overview
 
@@ -205,6 +206,13 @@ Claude Code:
   // Terraform or AWS CLI equivalent — shown as logical structure
   "name": "claude-code-enterprise",
   "description": "Server-side guardrails for Claude Code on Bedrock",
+
+  // VERIFIED 2026-05-30 — see "Streaming UX gotcha" section below.
+  // These messages flow back verbatim to the client (max 500 chars each).
+  // Default is "BLOCKED_INPUT_BY_GUARDRAIL" / "BLOCKED_OUTPUT_BY_GUARDRAIL"
+  // which Claude Code renders as if the model said it.
+  "blockedInputMessaging":  "[GUARDRAIL] Your request was blocked by enterprise security policy. Contact security@yourcompany.com if this is a false positive.",
+  "blockedOutputsMessaging": "[GUARDRAIL] The model's response was filtered by enterprise output policy.",
 
   "contentPolicy": {
     "filtersConfig": [
@@ -475,19 +483,51 @@ Claude Code renders this as the model's reply, so the user sees:
 BLOCKED_INPUT_BY_GUARDRAIL
 ```
 
-**Mitigations:**
+### Verified facts (2026-05-30, `tests/aws-guardrails/11_blocked_messaging.py`)
 
-1. **Customise `blockedInputMessaging`** to a string that's clearly not from
-   the model:
-   ```
-   "blockedInputMessaging": "[GUARDRAIL] Request blocked by enterprise policy. Contact security@yourcompany if this is a false positive."
-   ```
-2. Optionally add a local Claude Code hook on `PostToolUse`/output that
-   detects the magic string and surfaces it as a denial (with stderr) rather
-   than passing through as model text.
+| Property | Verified value |
+|---|---|
+| `blockedInputMessaging` flows verbatim in non-streaming response | ✅ exact match |
+| `blockedInputMessaging` flows verbatim as a **single** stream `content_block_delta` | ✅ exact match (delta count = 1) |
+| `blockedOutputsMessaging` (when output filter fires) flows verbatim, both modes | ✅ exact match |
+| Special characters preserved (`<script>`, `&`, `"`, CJK, emoji) | ✅ no escape, no mangle |
+| Min length | 1 char (empty rejected client-side) |
+| **Max length** | **500 chars** — `1000` chars rejected with `ValidationException: Member must have length less than or equal to 500` |
+| String templating (e.g., interpolating policy name into the message) | ❌ not supported; the string is returned exactly as configured |
 
-This behaviour is consistent across Mac, Linux EC2, and Windows EC2 (verified
-2026-05).
+### Recommended customisation
+
+Set both messages to a clearly non-model prefix so the user (and any UI on
+the receiving end) can tell this came from the guardrail, not the model.
+Both tested verbatim:
+
+```jsonc
+{
+  "blockedInputMessaging":  "[GUARDRAIL] Your request was blocked by enterprise security policy. Contact security@yourcompany.com if this is a false positive.",
+  "blockedOutputsMessaging": "[GUARDRAIL] The model's response was filtered by enterprise output policy."
+}
+```
+
+Stay under 500 chars per field. If you need more detail (e.g., an internal
+ticket link), keep the customer-facing message short and put the rest in a
+runbook the support email leads to.
+
+### Optional: client-side detection
+
+Because the guardrail message arrives through the same channel as model output,
+client code can't tell them apart at the protocol level. Two pragmatic options:
+
+1. **Distinctive prefix** (this kit's recommendation): pick a literal prefix
+   you would never expect from the model (`[GUARDRAIL]`, `🚫`, etc.) and have
+   a local hook scan output for it. If matched, surface the message via
+   `stderr` instead of letting it look like model text.
+
+2. **Watch CloudWatch `InvocationsIntervened`** out-of-band: this won't change
+   the in-session UX but lets ops see when interventions fire. See the
+   monitoring section above.
+
+This wire behaviour is consistent across Mac, Linux EC2, and Windows EC2
+(verified 2026-05).
 
 ## Items Requiring Verification
 
@@ -507,6 +547,7 @@ The remaining items still to validate **in your own environment**:
 | 8 | Latency impact | ✅ measured +18% p50 / +21% p95 | Will vary by policy complexity; re-measure after adding many regex patterns or denied topics. |
 | 9 | `PROMPT_ATTACK` recall in your environment | partial — measured 5/5 on classic jailbreaks | Test against your domain's actual injection attempts; some specific patterns may slip. |
 | 10 | Contextual Grounding for code-gen | ✅ verified — errors any request without `grounding_source` | Do NOT enable for general code-gen; only for narrow workflows with guaranteed source material. |
+| 11 | `blockedInputMessaging` / `blockedOutputsMessaging` customisation | ✅ verified — verbatim, max 500 chars, special chars OK | If you need >500 chars, summarise + link to runbook. |
 
 ## References
 

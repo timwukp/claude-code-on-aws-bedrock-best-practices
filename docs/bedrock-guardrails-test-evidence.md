@@ -22,6 +22,7 @@
 | 8 | Latency impact | ✅ **verified** | +323ms p50 (+18%), +495ms p95 (+21%) added by guardrail evaluation. `trace=ENABLED` adds no measurable extra cost. |
 | 9 | Issue #63637 resolution status | ⚠️ **rethink needed** | Test #10 below shows PROMPT_ATTACK fires in current API even WITHOUT the input tags the issue describes. Either the issue is now stale or the documented behaviour predates the current `contentPolicyConfig` model. |
 | 10 | Contextual Grounding for code generation | ❌ **PR is right about hedging — but stronger language warranted** | Without an explicit `grounding_source`, Bedrock returns `ValidationException: "The provided request does not contain the grounding source"` — i.e., the policy doesn't silently no-op, it **errors the entire request**. Enabling Contextual Grounding for general code-gen workloads would break Claude Code. |
+| 11 | `blockedInputMessaging` / `blockedOutputsMessaging` customisation | ✅ **verified verbatim** | Both messages flow back exactly as configured in non-streaming and streaming. Min 1 / max 500 chars. Special chars (HTML, CJK, emoji) preserved. Streaming returns a single `content_block_delta`. See Test 11 below. |
 
 ---
 
@@ -290,6 +291,67 @@ design. **The kit should:**
    docs, issue #63637, and the current API.
 
 ---
+
+---
+
+## Test 11 — `blockedInputMessaging` / `blockedOutputsMessaging` customisation (2026-05-30 follow-up)
+
+Script: `tests/aws-guardrails/11_blocked_messaging.py`
+
+Follow-up on the Test #1 streaming-UX gotcha. The recommendation was to
+"customise `blockedInputMessaging` to a string that's clearly not from the
+model" — but we hadn't actually tested whether custom strings round-trip
+through the wire. This test confirms (and discovers the length limit).
+
+### Setup
+
+For each subtest, create a fresh guardrail with a custom
+`blockedInputMessaging` (and where relevant, `blockedOutputsMessaging`),
+then trigger an intervention and capture the wire response in both
+streaming and non-streaming modes.
+
+### Results
+
+| # | Subtest | Result |
+|---|---|---|
+| 11.1 | Custom string (119 chars), CC trigger, non-streaming | ✅ verbatim match |
+| 11.1 | Same string, streaming | ✅ verbatim match in **single** `content_block_delta` |
+| 11.2 | Special chars: `[GUARDRAIL] <script>alert(1)</script> & "quotes" 你好 🚨` | ✅ verbatim — no HTML escape, no quote escape, CJK and emoji preserved |
+| 11.3 | Long string: 417 chars (within limit) | ✅ verbatim |
+| 11.4 | Empty string `""` | ❌ **rejected client-side**: `botocore.exceptions.ParamValidationError: Invalid length for parameter blockedInputMessaging, value: 0, valid min length: 1` |
+| 11.5 | 500 chars | ✅ accepted |
+| 11.5 | 1000 chars | ❌ **rejected server-side**: `ValidationException: Member must have length less than or equal to 500` |
+| 11.6 | Custom `blockedOutputsMessaging`, output filter triggered (custom word "pineapple" in model's tropical-fruit list), non-streaming | ✅ verbatim match |
+| 11.6 | Same, streaming | ✅ verbatim match in single delta |
+
+### Verified facts
+
+- **Both `blockedInputMessaging` and `blockedOutputsMessaging` flow back
+  verbatim** to the client in both streaming and non-streaming modes.
+- **Min length: 1** (empty rejected by botocore validator before the API call).
+- **Max length: 500 chars** (server-side `ValidationException`).
+- **No string mangling**: HTML, quotes, ampersands, CJK, emoji all preserved.
+- **Streaming intervention always returns a single `content_block_delta`** —
+  the entire custom message arrives in one chunk, regardless of length.
+- **No template variables**: the string is returned exactly as configured.
+  You cannot interpolate the matched policy name or rule into the message.
+
+### Recommendation
+
+In your guardrail config, set both messages to a clearly non-model prefix:
+
+```jsonc
+{
+  "blockedInputMessaging":  "[GUARDRAIL] Your request was blocked by enterprise security policy. Contact security@yourcompany.com if this is a false positive.",
+  "blockedOutputsMessaging": "[GUARDRAIL] The model's response was filtered by enterprise output policy."
+}
+```
+
+Stay under 500 chars per field. If you need more detail (internal ticket
+links, escalation procedure), keep the customer-facing message short and put
+the rest in the runbook the contact email leads to.
+
+This test cost ~$0.02 USD (7 short-lived guardrails + 6 invocations).
 
 ## EC2 cross-platform validation (PR item: implicit Windows verification)
 
