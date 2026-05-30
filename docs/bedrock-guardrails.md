@@ -4,6 +4,19 @@ Server-side content filtering and policy enforcement for Claude Code running on
 Amazon Bedrock. Guardrails operate at the API layer -- they apply regardless of
 client configuration, local hook bypasses, or `--print` mode gaps.
 
+> **Verification update (2026-05-29).** Several claims in earlier drafts of
+> this document have been revised based on live testing in
+> us-east-1 against Claude Haiku 4.5 / Sonnet 4.6 with a fully-configured
+> guardrail. Reproducible scripts and per-test evidence are in
+> [`bedrock-guardrails-test-evidence.md`](bedrock-guardrails-test-evidence.md)
+> and `tests/aws-guardrails/`. Key corrections incorporated below:
+> - **Prompt Attack filter works today** via the `contentPolicyConfig`
+>   filter type (does not require input tags). Earlier "does NOT work" claim
+>   was based on a separate legacy mechanism.
+> - **`InvocationsBlocked` metric does not exist.** Use `InvocationsIntervened`.
+> - **Streaming intervention does NOT raise an error**; it returns the
+>   `blockedInputMessaging` text as a normal stream delta.
+
 ## Overview
 
 AWS Bedrock Guardrails provide seven configurable protection policies that
@@ -22,12 +35,12 @@ Key value:
 
 | # | Policy | Works with Claude Code? | Notes |
 |---|--------|------------------------|-------|
-| 1 | Content Filters | **Yes** | 5 categories; input + output |
-| 2 | Prompt Attack Filters | **No** | Requires input tags not sent by Claude Code |
-| 3 | Denied Topics | **Yes** | Custom topic definitions |
+| 1 | Content Filters | **Yes** | 5 categories + PROMPT_ATTACK; input + output |
+| 2 | Prompt Attack Filter (as a Content Filter type) | **Yes** | Verified: fires today via `contentPolicyConfig.filtersConfig` with `type: PROMPT_ATTACK`, no input tags required |
+| 3 | Denied Topics | **Yes** | Custom topic definitions; semantic matching has measurable FPR (see calibration note below) |
 | 4 | Word Filters | **Yes** | Profanity + custom list (up to 10,000 items) |
-| 5 | Sensitive Information Filters | **Yes** | PII detection + custom regex |
-| 6 | Contextual Grounding Checks | **Yes** | Hallucination detection |
+| 5 | Sensitive Information Filters | **Yes** | PII detection + custom regex; pre-built catalogue is US-centric |
+| 6 | Contextual Grounding Checks | **Conditional** | Hallucination detection — but **errors any request without an explicit `grounding_source`**. Do NOT enable for general code-gen workloads |
 | 7 | Automated Reasoning Checks | **Yes** | Logical rule validation |
 
 ### 1. Content Filters
@@ -59,20 +72,36 @@ Standard tier extends content filter detection into code domains -- important fo
 a coding assistant. If your organization uses cross-region inference profiles
 (e.g., `us.anthropic.claude-sonnet-4-6`), Standard tier is available.
 
-### 2. Prompt Attack Filters
+### 2. Prompt Attack Filter (Content Filter type)
 
-Detects three attack categories:
-- **Jailbreaks** -- attempts to override model instructions
-- **Prompt Injection** -- hidden instructions in user-supplied content
-- **Prompt Leakage** -- attempts to extract system prompts (Standard tier only)
+Detects jailbreaks and prompt injection by adding `PROMPT_ATTACK` as a filter
+type inside `contentPolicyConfig.filtersConfig`. Verified to work with Claude
+Code: in our tests, **5/5 classic jailbreak prompts** were intercepted with
+`action=GUARDRAIL_INTERVENED`, both with and without input tags.
 
-> **CRITICAL: This policy does NOT work with Claude Code.**
->
-> The Prompt Attack filter requires the client to inject XML input tags of the
-> form `<amazon-bedrock-guardrails-guardContent_xyz>` around user content, and
-> include `amazon-bedrock-guardrailConfig.tagSuffix` in the request. Claude Code
-> does not do either of these. See [Critical Limitation: Prompt Attack Filter
-> (#63637)](#critical-limitation-prompt-attack-filter-63637) below.
+```jsonc
+{
+  "contentPolicyConfig": {
+    "filtersConfig": [
+      // ...other filters
+      {"type": "PROMPT_ATTACK", "inputStrength": "HIGH", "outputStrength": "NONE"}
+    ]
+  }
+}
+```
+
+> **History note.** Earlier drafts of this document claimed the Prompt Attack
+> filter did NOT work with Claude Code, citing a requirement to inject XML
+> input tags (`<amazon-bedrock-guardrails-guardContent_xyz>`) and a
+> `tagSuffix` parameter. Live testing in 2026-05 against the current Bedrock
+> API showed `PROMPT_ATTACK` as a content-filter type fires today without
+> any of those tags. The boto3 service shape confirms there is no separate
+> `promptAttackPolicyConfig` — Prompt Attack is one of the filters under
+> `contentPolicyConfig`. The "input tag" mechanism described in some AWS
+> documentation pages and in [#63637](https://github.com/anthropics/claude-code/issues/63637)
+> appears to predate the current API. See
+> [bedrock-guardrails-test-evidence.md](bedrock-guardrails-test-evidence.md#test-10--prompt-attack-filter-pr-items-1-9-10--issue-63637)
+> for the test details.
 
 ### 3. Denied Topics
 
@@ -179,11 +208,12 @@ Claude Code:
 
   "contentPolicy": {
     "filtersConfig": [
-      { "type": "HATE",       "inputStrength": "HIGH", "outputStrength": "HIGH" },
-      { "type": "INSULTS",    "inputStrength": "MEDIUM", "outputStrength": "MEDIUM" },
-      { "type": "SEXUAL",     "inputStrength": "HIGH", "outputStrength": "HIGH" },
-      { "type": "VIOLENCE",   "inputStrength": "MEDIUM", "outputStrength": "MEDIUM" },
-      { "type": "MISCONDUCT", "inputStrength": "HIGH", "outputStrength": "HIGH" }
+      { "type": "HATE",          "inputStrength": "HIGH",   "outputStrength": "HIGH" },
+      { "type": "INSULTS",       "inputStrength": "MEDIUM", "outputStrength": "MEDIUM" },
+      { "type": "SEXUAL",        "inputStrength": "HIGH",   "outputStrength": "HIGH" },
+      { "type": "VIOLENCE",      "inputStrength": "MEDIUM", "outputStrength": "MEDIUM" },
+      { "type": "MISCONDUCT",    "inputStrength": "HIGH",   "outputStrength": "HIGH" },
+      { "type": "PROMPT_ATTACK", "inputStrength": "HIGH",   "outputStrength": "NONE" }
     ]
   },
 
@@ -226,87 +256,53 @@ Claude Code:
 }
 ```
 
-> **Note:** Do NOT configure `promptAttackPolicy` -- it will not function with
-> Claude Code until the input tagging limitation is resolved.
+> **Note on policies you should NOT enable for general code-generation:**
+> - `contextualGroundingPolicy` requires every request to carry a
+>   `grounding_source` qualifier. Bedrock returns `ValidationException`
+>   (request fails entirely) if it is missing. Only enable for narrow
+>   workflows where you guarantee source material is in context.
+> - `automatedReasoningPolicy` is region-limited and requires a defined rule
+>   set; not useful as a default for code-gen.
 
 ## What Works and What Doesn't
 
 | Policy | Status | Direction | Reason |
 |--------|--------|-----------|--------|
-| Content Filters | **Works** | Input + Output | No input tags required |
-| Denied Topics | **Works** | Input + Output | Semantic matching, no tags required |
-| Word Filters | **Works** | Input + Output | Exact match, no tags required |
-| Sensitive Information Filters | **Works** | Input + Output | Pattern/entity matching, no tags required |
-| Contextual Grounding Checks | **Works** | Output only | Evaluates model output |
-| Automated Reasoning Checks | **Works** | Output only | Evaluates model output |
-| Prompt Attack Filters | **Does NOT work** | N/A | Requires `guardContent` input tags not sent by Claude Code |
+| Content Filters (incl. PROMPT_ATTACK) | **Works** | Input + Output | Verified: 5/5 jailbreaks intercepted without input tags |
+| Denied Topics | **Works** | Input + Output | Semantic matching; calibrate for FPR |
+| Word Filters | **Works** | Input + Output | Exact match |
+| Sensitive Information Filters | **Works** | Input + Output | Pre-built catalogue is US-centric; supplement with `regexesConfig` for non-US PII |
+| Contextual Grounding Checks | **Conditional** | Output | **Errors any request without `grounding_source`** — do NOT enable for general code-gen |
+| Automated Reasoning Checks | **Works in region-supported** | Output | Region-limited; needs defined rule set |
 
-The key distinction: policies that rely on pattern matching or semantic analysis
-of raw content work fine. The Prompt Attack filter is unique in requiring the
-client to explicitly mark which portions of the input are user-supplied content
--- and Claude Code does not do this.
-
-## Critical Limitation: Prompt Attack Filter (#63637)
+## Note on Issue #63637 and the "input tag" docs
 
 **GitHub Issue:** [anthropics/claude-code#63637](https://github.com/anthropics/claude-code/issues/63637)
 -- "[Feature Request] Support Bedrock Guardrails Prompt Attack filter by
 injecting guard_content input tags"
 
-**Status:** OPEN
+**Status (2026-05):** OPEN, but **likely stale**.
 
-### The Problem
+The issue is based on AWS documentation pages describing a separate
+"guardContent input tag + tagSuffix" mechanism for Prompt Attack detection.
+Live testing against the current Bedrock API (2026-05) shows that the
+`PROMPT_ATTACK` filter **inside `contentPolicyConfig.filtersConfig`** fires
+today on jailbreak/injection attempts without any input tags or tagSuffix.
+The boto3 service shape (`bedrock.create_guardrail`) lists no separate
+`promptAttackPolicyConfig` — only `contentPolicyConfig`.
 
-AWS Bedrock's Prompt Attack filter requires the calling application to wrap user
-content in XML tags:
+Two possibilities, neither fully proven from the outside:
+1. The "guardContent input tag" mechanism still exists for an advanced
+   detection path that requires explicit user/system content separation, and
+   the simpler `PROMPT_ATTACK` content filter type is a different
+   (lower-resolution) feature that happens to work without tags.
+2. The input-tag mechanism has been deprecated and replaced by the
+   content-filter-type approach; AWS docs for it haven't been updated.
 
-```
-<amazon-bedrock-guardrails-guardContent_xyz>
-  user-supplied content here
-</amazon-bedrock-guardrails-guardContent_xyz>
-```
-
-The `xyz` suffix is a random value provided via
-`amazon-bedrock-guardrailConfig.tagSuffix` in the API request. Claude Code does
-not inject these tags and does not include the tag suffix parameter.
-
-### What AWS Documentation States
-
-From the official AWS documentation on input tagging:
-
-> "You must always use input tags with your guardrails to indicate user inputs
-> in the input prompt while using InvokeModel and InvokeModelWithResponseStream
-> API operations for model inference. If there are no tags, prompt attacks for
-> those use cases will not be filtered."
-
-And:
-
-> "If there are no tags in the input prompt, the complete prompt will be
-> processed by guardrails. The only exception is Detect prompt attacks with
-> Amazon Bedrock Guardrails filters, which require input tags to be present."
-
-### Why the Random Tag Suffix Matters
-
-AWS recommends using a new random string as the `tagSuffix` for every request:
-
-> "It is recommended to use a new, random string as the tagSuffix for every
-> request. This helps mitigate potential prompt injection attacks by making the
-> tag structure unpredictable."
-
-> "A static tag can result in a malicious user closing the XML tag and appending
-> malicious content after the tag closure, resulting in an injection attack."
-
-This is a security-critical design -- without randomized tags, an attacker could
-craft input that closes the tag boundary and injects content outside the guarded
-region.
-
-### Impact
-
-Without input tags, the Prompt Attack filter is completely non-functional. The
-guardrail cannot distinguish between system instructions and user content, so it
-cannot detect prompt injection or jailbreak attempts at the API layer.
-
-The other six policies work because they operate on the full request content
-without needing to know which parts are user-supplied.
+For a production deployment in 2026-05, **enable `PROMPT_ATTACK` in
+`contentPolicyConfig`** — it provides material protection today against
+classic jailbreak and injection attempts, regardless of how #63637 ultimately
+resolves.
 
 ## Defense Architecture
 
@@ -334,10 +330,10 @@ without needing to know which parts are user-supplied.
 │  ┌─────────────────────────────────────────────────┐                    │
 │  │ Guardrails — INPUT Filters                      │                    │
 │  │  • Content Filters (Hate/Insults/Sexual/etc.)   │                    │
+│  │  • Prompt Attack (as content-filter type)  ✓    │                    │
 │  │  • Denied Topics                                │                    │
 │  │  • Word Filters                                 │                    │
 │  │  • Sensitive Info (PII + regex)                 │                    │
-│  │  • Prompt Attack  ← NOT FUNCTIONAL (no tags)    │                    │
 │  └───────────────────────┬─────────────────────────┘                    │
 │                          │ (blocked if policy violated)                 │
 │                          ▼                                              │
@@ -365,35 +361,40 @@ without needing to know which parts are user-supplied.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Interim Mitigations
+## Layered Mitigations for Prompt Injection
 
-Until [#63637](https://github.com/anthropics/claude-code/issues/63637) is
-resolved and Claude Code sends input tags, use these compensating controls for
-prompt injection protection:
+Even with `PROMPT_ATTACK` enabled, prompt injection is one of the harder
+classes of attack to fully prevent. Use these compensating controls in
+combination:
 
-1. **Deny rules in settings.json** -- block known dangerous tool patterns that a
-   prompt injection might attempt. See
-   [settings-linux-macos.jsonc](settings-linux-macos.jsonc) for the full deny
-   list covering `curl`, `wget`, `sudo`, `git push`, and sensitive file reads.
+1. **`PROMPT_ATTACK` in contentPolicyConfig** -- the first line of defence,
+   verified to fire on classic jailbreak/injection patterns.
 
-2. **Local PreToolUse hooks** -- `git-guard.sh` and `pii-guard.sh` inspect every
-   tool invocation before execution, blocking suspicious patterns regardless of
-   what the model was instructed to do.
+2. **Deny rules in settings.json** -- block known dangerous tool patterns
+   that a successful injection might attempt. See
+   [settings-linux-macos.jsonc](settings-linux-macos.jsonc) for the full
+   deny list covering `curl`, `wget`, `sudo`, `git push`, and sensitive
+   file reads.
 
-3. **Denied Topics policy** -- configure guardrail denied topics for
-   "Instructions to disable security controls" and similar. This uses semantic
-   matching (not input tag detection) and works today.
+3. **Local PreToolUse hooks** -- `git-guard.sh` and `pii-guard.sh` inspect
+   every tool invocation before execution, blocking suspicious patterns
+   regardless of what the model was instructed to do.
 
-4. **Content Filters at HIGH threshold** -- catches many prompt injection
+4. **Denied Topics policy** -- configure denied topics for "Instructions to
+   disable security controls" and similar. Semantic matching; calibrate
+   topic definitions against your prompts to manage FPR (we measured
+   ~16.7% on a small edge-case set).
+
+5. **Content Filters at HIGH threshold** -- catches many prompt injection
    payloads that contain harmful content categories as a side effect.
 
-5. **Managed settings enforcement** -- use `managed-settings.json` deployed via
-   SSM/MDM to prevent developers from removing hooks or deny rules. See
-   [deployment-guide.md](deployment-guide.md).
+6. **Managed settings enforcement** -- use `managed-settings.json`
+   deployed via SSM/MDM to prevent developers from removing hooks or deny
+   rules. See [deployment-guide.md](deployment-guide.md).
 
-6. **Network isolation** -- VPC endpoint policies and deny rules for `curl`/`wget`
-   prevent data exfiltration even if injection succeeds. See
-   [security-rationale.md](security-rationale.md).
+7. **Network isolation** -- VPC endpoint policies and deny rules for
+   `curl`/`wget` prevent data exfiltration even if injection succeeds.
+   See [security-rationale.md](security-rationale.md).
 
 ## Monitoring and CloudWatch
 
@@ -402,16 +403,27 @@ to CloudWatch. Set up alarms to detect:
 
 ### Key Metrics
 
+Verified from `aws cloudwatch list-metrics --namespace AWS/Bedrock/Guardrails`
+(2026-05-29):
+
 | Metric | Namespace | Meaning |
 |--------|-----------|---------|
 | `Invocations` | `AWS/Bedrock/Guardrails` | Total guardrail evaluations |
-| `InvocationsIntervened` | `AWS/Bedrock/Guardrails` | Requests where guardrail took action |
-| `InvocationsBlocked` | `AWS/Bedrock/Guardrails` | Requests fully blocked |
+| `InvocationsIntervened` | `AWS/Bedrock/Guardrails` | Requests where guardrail took action (block or anonymize) |
+| `InvocationLatency` | `AWS/Bedrock/Guardrails` | Guardrail processing latency, ms |
+| `TextUnitCount` | `AWS/Bedrock/Guardrails` | Text policy units consumed (for cost tracking) |
+
+**Dimensions:** `GuardrailArn`, `GuardrailVersion`, `GuardrailPolicyType`,
+`GuardrailContentSource`, `Operation`. Use `GuardrailPolicyType` to slice
+intervention rate by policy (content/topic/word/sensitive/contextual).
+
+> **Note:** an earlier draft of this doc listed `InvocationsBlocked` — that
+> metric does **not** exist. Use `InvocationsIntervened`.
 
 ### Recommended Alarms
 
 ```
-# Alarm: sustained guardrail interventions (potential attack or misconfiguration)
+# Alarm 1: sustained interventions (potential attack or misconfiguration)
 MetricName: InvocationsIntervened
 Statistic: Sum
 Period: 300
@@ -421,9 +433,19 @@ ComparisonOperator: GreaterThanThreshold
 ```
 
 ```
-# Alarm: high block rate (>20% of requests blocked -- likely misconfiguration)
-# Use metric math: InvocationsBlocked / Invocations * 100
+# Alarm 2: high intervention rate (>20% of requests intervened — likely misconfig)
+# Use metric math: InvocationsIntervened / Invocations * 100
 Threshold: 20
+```
+
+```
+# Alarm 3: guardrail latency regression
+MetricName: InvocationLatency
+Statistic: p99
+Period: 300
+EvaluationPeriods: 2
+Threshold: 1000   # ms; baseline observed in tests was 130–230ms
+ComparisonOperator: GreaterThanThreshold
 ```
 
 ### Logging Guardrail Decisions
@@ -436,53 +458,55 @@ The trace includes which policy triggered, the matched content, and the action
 taken. This integrates with the local audit chain from `audit-logger.sh` to
 give end-to-end visibility.
 
+## Streaming UX gotcha (read this)
+
+When a guardrail blocks a prompt sent via
+`InvokeModelWithResponseStream` (which Claude Code uses by default), Bedrock
+does **not** raise an HTTP error or `stream_error` event. Instead, the client
+receives a structurally-valid streaming response whose first (and only)
+`content_block_delta` carries the literal text from
+`blockedInputMessaging` — by default `BLOCKED_INPUT_BY_GUARDRAIL`.
+
+Claude Code renders this as the model's reply, so the user sees:
+
+```
+> Please charge my card 4111-1111-1111-1111
+
+BLOCKED_INPUT_BY_GUARDRAIL
+```
+
+**Mitigations:**
+
+1. **Customise `blockedInputMessaging`** to a string that's clearly not from
+   the model:
+   ```
+   "blockedInputMessaging": "[GUARDRAIL] Request blocked by enterprise policy. Contact security@yourcompany if this is a false positive."
+   ```
+2. Optionally add a local Claude Code hook on `PostToolUse`/output that
+   detects the magic string and surfaces it as a denial (with stderr) rather
+   than passing through as model text.
+
+This behaviour is consistent across Mac, Linux EC2, and Windows EC2 (verified
+2026-05).
+
 ## Items Requiring Verification
 
-The following items should be tested in your specific AWS environment before
-relying on them in production:
+Most items in earlier drafts have now been verified live (see
+[bedrock-guardrails-test-evidence.md](bedrock-guardrails-test-evidence.md)).
+The remaining items still to validate **in your own environment**:
 
-1. **Guardrail intervention behavior with streaming** -- Claude Code uses
-   `InvokeModelWithResponseStream`. Verify that guardrail blocks interrupt the
-   stream cleanly and Claude Code surfaces the error to the user.
-
-2. **CloudWatch metric names and namespace** -- AWS may update metric names.
-   Confirm the exact namespace and metric names available in your account by
-   checking the CloudWatch console after triggering a test intervention.
-
-3. **Specific PII types detected** -- test each PII type you care about (credit
-   cards, SSNs, phone numbers, emails) with sample data to confirm detection
-   thresholds match your expectations.
-
-4. **Interaction with cross-region inference** -- if using inference profiles
-   (e.g., `us.anthropic.claude-sonnet-4-6`), confirm guardrails apply correctly
-   across region routing.
-
-5. **Standard tier availability** -- Standard tier requires cross-region
-   inference and may not be available in all regions. Verify in your account.
-
-6. **Denied Topics semantic matching accuracy** -- test your topic definitions
-   with both obvious and edge-case prompts to calibrate false positive/negative
-   rates.
-
-7. **Guardrail version behavior** -- when you update a guardrail, verify that
-   the version number in `ANTHROPIC_CUSTOM_HEADERS` matches the published
-   version, or use `DRAFT` for testing only.
-
-8. **Latency impact** -- measure baseline latency with and without guardrails
-   enabled. Complex policies (multiple denied topics, many PII types, custom
-   regex) add processing time to every request.
-
-9. **Prompt Attack filter status** -- monitor
-   [#63637](https://github.com/anthropics/claude-code/issues/63637) for
-   resolution. When Claude Code adds input tag support, re-enable the Prompt
-   Attack policy.
-
-10. **Contextual Grounding behavior** -- verify how Bedrock interprets
-    conversation history as "source material" for grounding checks. Test whether
-    the policy triggers for novel code generation (where no explicit reference
-    document is provided) and whether it produces false positives or simply does
-    not activate. Adjust thresholds or disable if the behavior is unhelpful for
-    your use case.
+| # | Item | Status | Why your env may differ |
+|---|---|---|---|
+| 1 | Streaming intervention shape | ✅ verified — see "Streaming UX gotcha" above | Behaviour stable across SDKs/regions in our tests, but Claude Code's specific rendering of the magic string may change between releases. |
+| 2 | CloudWatch metric names & namespace | ✅ verified `AWS/Bedrock/Guardrails` with 4 metric names | AWS occasionally adds metrics; re-check `list-metrics` after major Bedrock releases. |
+| 3 | PII detection thresholds | ✅ verified — Bedrock pre-built catalogue is US-centric | Country-specific PII (NRIC, EU phone formats) needs `regexesConfig` patterns. |
+| 4 | Cross-region inference + Guardrails | ✅ verified for `us.*` and `global.*` | Other inference-profile prefixes may exist for new regions. |
+| 5 | Standard tier availability | ✅ available in us-east-1 | Re-check in your target region; schema is `tierConfig.tierName="STANDARD"` + `crossRegionConfig`. |
+| 6 | Denied Topics FPR | ✅ measured ~16.7% on small edge-case set | Calibrate against your actual prompt distribution — your topic definitions and example data will differ. |
+| 7 | Version handling | ✅ verified | DRAFT / numeric / invalid all behave as expected; bad-id and bad-version produce identical errors. |
+| 8 | Latency impact | ✅ measured +18% p50 / +21% p95 | Will vary by policy complexity; re-measure after adding many regex patterns or denied topics. |
+| 9 | `PROMPT_ATTACK` recall in your environment | partial — measured 5/5 on classic jailbreaks | Test against your domain's actual injection attempts; some specific patterns may slip. |
+| 10 | Contextual Grounding for code-gen | ✅ verified — errors any request without `grounding_source` | Do NOT enable for general code-gen; only for narrow workflows with guaranteed source material. |
 
 ## References
 
