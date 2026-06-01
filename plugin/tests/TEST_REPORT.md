@@ -8,6 +8,22 @@ Reproducible — regenerate any time:
 bash tests/run-tests.sh        # → RESULT: 76 passed, 0 failed
 ```
 
+## Official validation (pre-submission)
+
+Before submitting to the Claude Code community marketplace, the plugin was
+checked with Anthropic's own tooling (the review pipeline runs the same
+`claude plugin validate`). Verified on Claude Code v2.1.159:
+
+| Check | Command | Result |
+|---|---|---|
+| Manifest validation | `claude plugin validate plugin/` | ✔ Validation passed (exit 0) |
+| Strict validation (review-pipeline level) | `claude plugin validate --strict plugin/` | ✔ Validation passed (exit 0) |
+| Real plugin load | `claude --plugin-dir plugin/ -p …` | Loaded, `hooks.json` parsed, no plugin load error |
+| Functional suite | `bash plugin/tests/run-tests.sh` | 76 passed / 0 failed |
+
+`--strict` treats warnings (unrecognized fields, missing metadata) as errors, so
+a clean strict pass means the manifest meets the bar the automated review applies.
+
 ## Method
 
 - **Isolation.** Each run uses a throwaway `HOME` (`mktemp -d`); audit log, dev
