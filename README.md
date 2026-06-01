@@ -53,6 +53,7 @@ This kit is more than configuration files. It's a complete operational kit:
 | **Observability** | CloudWatch dashboard + alarms (hook crash rate, latency p99, drift events) |
 | **Verification suite** | 75+ assertions across 7 test suites: PII corpus FNR/FPR, audit chain tamper detection, bypass red-team (32 attempts), latency benchmarks, Bedrock Guardrails live verification |
 | **Operational docs** | Threat model (STRIDE), incident response, on-call runbook, hook contract, platform compensations, test evidence, deployment guide |
+| **Installable plugin** | `plugin/` — opt-in Claude Code plugin packaging 5 hooks for the official marketplace; user-friendly defaults; 76-assertion test suite |
 
 ## Defense-in-Depth Architecture
 
@@ -102,6 +103,27 @@ deny rules cannot be removed by lower levels:
 This kit ships configs for Levels 1 and 2:
 - [`docs/managed-settings.jsonc`](docs/managed-settings.jsonc) → Level 1
 - [`docs/settings-linux-macos.jsonc`](docs/settings-linux-macos.jsonc) / [`docs/settings-windows.jsonc`](docs/settings-windows.jsonc) → Level 2
+
+## Try It as a Plugin (opt-in, 1 command)
+
+Want to evaluate these controls without the full IaC deployment? The hooks are
+also packaged as an installable Claude Code plugin with **user-friendly
+defaults** (no root required — state goes to `~/.claude/claude-code-security/`):
+
+```
+/plugin install claude-code-bedrock-security@claude-plugins-official
+```
+
+The plugin bundles 5 of the hooks (PII guard · git guard · HMAC-chained audit
+logger · token-budget breaker · fail-closed telemetry shim), recognises PII
+across 7 jurisdictions, and ships **76 reproducible test assertions**
+(`plugin/tests/run-tests.sh`). See [`plugin/README.md`](plugin/README.md).
+
+> **Plugin vs. enterprise enforcement.** The plugin is the opt-in,
+> user-removable on-ramp for individuals and evaluation. For **un-removable,
+> fleet-wide enforcement** — root-owned paths, fail-closed audit, SIEM
+> integration — deploy the same hooks via `managed-settings.json` + the
+> Terraform modules below. Same hooks, different trust boundary.
 
 ## Quick Start (Linux/macOS, 5 minutes)
 
@@ -446,6 +468,20 @@ Some features in this kit require specific Claude Code versions:
 | `managed-settings.d/` directory support | v2.1.83+ |
 | `DISABLE_AUTOUPDATER` env var | v2.1.118+ |
 | `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ |
+
+## Disclaimer
+
+This is an **independent, personal open-source project — not affiliated with,
+endorsed by, or supported by Anthropic or AWS.** "Claude", "Bedrock", and
+related names are trademarks of their respective owners, used here for
+descriptive purposes only.
+
+The security controls are provided **"AS IS", without warranty of any kind**.
+They are best-effort and do not guarantee detection of all sensitive data or
+compliance with any law or standard, and do **not** constitute legal,
+regulatory, or professional security advice. You are responsible for validating
+them in your own environment. See [DISCLAIMER.md](DISCLAIMER.md) and the
+[LICENSE](LICENSE). **Use at your own risk.**
 
 ## License & Contributing
 
