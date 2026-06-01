@@ -51,6 +51,7 @@ Claude Code 功能強大,但預設情況下可能會:
 | **可觀測性** | CloudWatch dashboard + alarm(hook 崩潰率、延遲 p99、漂移事件) |
 | **驗證套件** | 7 個測試套件、75+ 個斷言:PII corpus FNR/FPR、稽核鏈篡改偵測、紅隊繞過(32 次嘗試)、延遲基準、Bedrock Guardrails 線上驗證 |
 | **維運文件** | 威脅模型(STRIDE)、事件回應、值班 runbook、hook 合約、平台補償控制、測試證據、部署指南 |
+| **可安裝外掛** | `plugin/` —— 將 5 個 hook 打包成可一鍵安裝的 Claude Code 外掛,供官方 marketplace 收錄;個人友善預設;76 個斷言測試套件 |
 
 ## 深度防禦架構
 
@@ -97,6 +98,25 @@ Claude Code 從四個層級合併設定。較高層級覆蓋較低層級,managed
 本套件提供 Level 1 與 Level 2 的設定:
 - [`docs/managed-settings.jsonc`](docs/managed-settings.jsonc) → Level 1
 - [`docs/settings-linux-macos.jsonc`](docs/settings-linux-macos.jsonc) / [`docs/settings-windows.jsonc`](docs/settings-windows.jsonc) → Level 2
+
+## 以外掛試用(opt-in,一行指令)
+
+想先評估這些控制、又不想做完整 IaC 部署?這些 hook 也打包成了可安裝的
+Claude Code 外掛,採用**個人友善預設**(免 root —— 狀態寫到
+`~/.claude/claude-code-security/`):
+
+```
+/plugin install claude-code-bedrock-security@claude-plugins-official
+```
+
+外掛打包了 5 個 hook(PII guard、git guard、HMAC 鏈式稽核日誌、token 預算斷路器、
+fail-closed 遙測 shim),PII 偵測涵蓋 7 個法域,並附 **76 個可重現測試斷言**
+(`plugin/tests/run-tests.sh`)。詳見 [`plugin/README.md`](plugin/README.md)。
+
+> **外掛 vs. 企業強制。** 外掛是給個人與評估用的 opt-in、可自行移除的入口。若要
+> **不可移除、全機隊強制執行**(root 擁有路徑、fail-closed 稽核、SIEM 整合),
+> 請用 `managed-settings.json` + 下方的 Terraform 模組部署同一批 hook。
+> 同樣的 hook,不同的信任邊界。
 
 ## 快速開始 (Linux/macOS,5 分鐘)
 
@@ -438,6 +458,16 @@ claude-code-on-aws-bedrock-best-practices/
 | `managed-settings.d/` 目錄支援 | v2.1.83+ |
 | `DISABLE_AUTOUPDATER` 環境變數 | v2.1.118+ |
 | `ANTHROPIC_BEDROCK_SERVICE_TIER` | v2.1.122+ |
+
+## 免責聲明
+
+本專案為**獨立的個人開源作品 —— 與 Anthropic 或 AWS 無任何隸屬、背書或支援關係。**
+「Claude」、「Bedrock」等名稱為各自所有者的商標,此處僅作描述性使用。
+
+本套件的安全控制以**「現狀」(AS IS)提供,不附任何形式的擔保**。它們屬盡力而為的
+控制,不保證偵測所有敏感資料、也不保證符合任何法律或標準,且**不構成**法律、法規
+或專業資安建議。你必須自行在自己的環境中驗證。詳見 [DISCLAIMER.md](DISCLAIMER.md)
+與 [LICENSE](LICENSE)。**使用風險自負。**
 
 ## 授權與貢獻
 
