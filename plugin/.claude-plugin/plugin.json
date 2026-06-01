@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-bedrock-security",
+  "name": "fail-closed-security-hooks",
   "version": "1.0.0",
   "description": "Enterprise security controls for Claude Code on Amazon Bedrock. Fail-closed PII/secrets guard, git policy guard, tamper-evident HMAC hash-chained audit log, and a token-budget circuit breaker — all wrapped by a telemetry shim that converts silent hook failures into explicit denials. Built for regulated industries (banking, healthcare, government); pairs with managed-settings + Terraform for un-removable enforcement.",
   "author": {

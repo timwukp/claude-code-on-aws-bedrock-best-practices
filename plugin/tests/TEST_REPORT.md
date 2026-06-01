@@ -1,4 +1,4 @@
-# Test Report — claude-code-bedrock-security
+# Test Report — fail-closed-security-hooks
 
 **Last run:** 2026-06-01 · **Result: 76 passed / 0 failed (76 total)** · plugin v1.0.0 (pii-guard v2.0.1)
 

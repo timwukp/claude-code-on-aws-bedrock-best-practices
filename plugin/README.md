@@ -23,7 +23,7 @@ Official AWS guidance for Claude Code on Bedrock ([`aws-solutions-library-sample
 ## Install
 
 ```
-/plugin install claude-code-bedrock-security@claude-plugins-official
+/plugin install fail-closed-security-hooks@claude-community
 ```
 
 Or browse `/plugin > Discover`.
@@ -42,10 +42,10 @@ Or browse `/plugin > Discover`.
 
 ## Verify the claims yourself
 
-Every claim above is reproducible. Run the bundled suite (37 assertions, isolated sandbox, no network/root needed):
+Every claim above is reproducible. Run the bundled suite (76 assertions, isolated sandbox, no network/root needed):
 
 ```bash
-bash tests/run-tests.sh        # → RESULT: 37 passed, 0 failed
+bash tests/run-tests.sh        # → RESULT: 76 passed, 0 failed
 ```
 
 See [`tests/TEST_REPORT.md`](./tests/TEST_REPORT.md) for the method and full results. Or verify the headline differentiator — the tamper-evident audit chain — by hand:

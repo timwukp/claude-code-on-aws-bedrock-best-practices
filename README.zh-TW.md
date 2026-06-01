@@ -106,7 +106,7 @@ Claude Code 外掛,採用**個人友善預設**(免 root —— 狀態寫到
 `~/.claude/claude-code-security/`):
 
 ```
-/plugin install claude-code-bedrock-security@claude-plugins-official
+/plugin install fail-closed-security-hooks@claude-community
 ```
 
 外掛打包了 5 個 hook(PII guard、git guard、HMAC 鏈式稽核日誌、token 預算斷路器、
