@@ -1,0 +1,20 @@
+{
+  "name": "claude-code-bedrock-security",
+  "version": "1.0.0",
+  "description": "Enterprise security controls for Claude Code on Amazon Bedrock. Fail-closed PII/secrets guard, git policy guard, tamper-evident HMAC hash-chained audit log, and a token-budget circuit breaker — all wrapped by a telemetry shim that converts silent hook failures into explicit denials. Built for regulated industries (banking, healthcare, government); pairs with managed-settings + Terraform for un-removable enforcement.",
+  "author": {
+    "name": "Tim Wu"
+  },
+  "homepage": "https://github.com/timwukp/claude-code-on-aws-bedrock-best-practices",
+  "repository": "https://github.com/timwukp/claude-code-on-aws-bedrock-best-practices",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "aws-bedrock",
+    "enterprise",
+    "compliance",
+    "audit",
+    "pii",
+    "devsecops"
+  ]
+}
