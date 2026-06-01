@@ -111,7 +111,7 @@ also packaged as an installable Claude Code plugin with **user-friendly
 defaults** (no root required — state goes to `~/.claude/claude-code-security/`):
 
 ```
-/plugin install claude-code-bedrock-security@claude-plugins-official
+/plugin install fail-closed-security-hooks@claude-community
 ```
 
 The plugin bundles 5 of the hooks (PII guard · git guard · HMAC-chained audit

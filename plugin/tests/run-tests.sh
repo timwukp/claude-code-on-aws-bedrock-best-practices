@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Test suite for claude-code-bedrock-security plugin
+# Test suite for fail-closed-security-hooks plugin
 # =============================================================================
 # Comprehensive, reproducible assertion suite covering all 5 hooks, the chain
 # verifier, every PII pattern, all git-guard checks, both budget dimensions,
@@ -58,7 +58,7 @@ assert_label() {
 pii() { printf '{"hook_event_name":"UserPromptSubmit","prompt":%s}' "$1"; }   # $1 must be a JSON string
 
 echo "============================================================"
-echo " claude-code-bedrock-security — comprehensive test suite"
+echo " fail-closed-security-hooks — comprehensive test suite"
 echo " plugin root:  $ROOT"
 echo " sandbox HOME: $HOME"
 echo "============================================================"
