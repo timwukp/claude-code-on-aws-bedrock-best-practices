@@ -358,3 +358,65 @@ ignored** without any error or warning.
    validation script and fail if below the required minimum.
 3. **Do not rely on `minimumVersion` setting:** As documented in Issue 5,
    this setting has no observable enforcement effect.
+
+---
+
+## Issue 13: MCP Tool Calls Bypass All Bash-Matcher Hooks
+
+**Affected platform:** All
+**Discovered:** 2026-08-13 during production hardening (macOS, Bedrock)
+
+### Symptom
+
+With `git-guard.sh` and `pii-guard.sh` fully registered and verified firing on
+Bash commands, a GitHub MCP server (official `github` server, Docker MCP
+Toolkit gateway, etc.) can still:
+
+```
+mcp__github__push_files            (branch: "main")   → ✅ writes straight to main
+mcp__github__create_or_update_file (branch: "main")   → ✅ writes straight to main
+mcp__github__merge_pull_request                       → ✅ agent merges its own PR
+```
+
+with **zero hook invocations**. Secrets in the `content` / `files[].content`
+fields leave the machine unscanned.
+
+### Root Cause
+
+Not a bug — matcher semantics. The hooks in this kit register with
+`"matcher": "Bash"` and inspect `tool_input.command`. MCP tools arrive as
+`tool_name: "mcp__<server>__<tool>"` with structured `tool_input` and no
+`command` field, so no Bash-matcher hook (nor `Bash(...)` permission rule)
+ever sees them. `git-guard.sh` additionally exits 0 for any non-Bash
+`tool_name` by design.
+
+### Workaround
+
+Register a second PreToolUse entry with an MCP matcher and a guard that reads
+the structured fields:
+
+```jsonc
+"PreToolUse": [
+  { "matcher": "Bash",    "hooks": [ /* existing */ ] },
+  { "matcher": "mcp__.*", "hooks": [ { "type": "command",
+      "command": "/usr/local/etc/claude-code/hooks/mcp-repo-guard.sh" } ] }
+]
+```
+
+Match on the tool-name *suffix* (`push_files`, `merge_pull_request`, …), not
+the full name — the `<server>` segment varies per machine. Apply the same
+branch-protection policy to `tool_input.branch` (absent ⇒ default branch) and
+run the same PII/secret patterns over every content field, imported from a
+shared module rather than copied.
+
+Verification caveat: piping test payloads into the guard proves its logic but
+not its registration. Confirm liveness against a *real* MCP call in a live
+session (any read-only tool) — see
+[`docs/hook-hardening-lessons.md`](hook-hardening-lessons.md) §3.
+
+### Status
+
+- Matcher semantics, present in all versions tested (2.1.150–2.1.15x)
+- Same gap applies to `gh` CLI / `gh api` / `curl` REST writes, which are Bash
+  commands but not `git` subcommands — `git-guard.sh` does not inspect them
+  ([`docs/hook-hardening-lessons.md`](hook-hardening-lessons.md) §2)
