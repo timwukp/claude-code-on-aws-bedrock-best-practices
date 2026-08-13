@@ -79,6 +79,14 @@ See [`docs/threat-model.md`](docs/threat-model.md) for STRIDE attack-tree
 analysis and [`docs/test-evidence.md`](docs/test-evidence.md) for the verified
 performance and security numbers.
 
+> ⚠️ **Coverage caveat:** layers 2–3 fire on the **Bash** matcher only. If the
+> session has a write-capable **MCP server** (GitHub MCP, Docker MCP Toolkit)
+> or an authenticated **`gh` CLI**, those write paths bypass every
+> Bash-matcher hook — verified empirically. Register a second hook on
+> `mcp__.*` and extend the git guard to `gh api` forms:
+> [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) and
+> [`docs/known-issues.md`](docs/known-issues.md) Issue 13.
+
 ## Settings Hierarchy
 
 Claude Code merges settings from four levels. Higher levels win, and managed-level
@@ -332,6 +340,7 @@ Documents are grouped by audience and use case.
 - [`docs/known-issues.md`](docs/known-issues.md) — Matcher bugs, platform quirks, and verified workarounds
 - [`docs/platform-compensations.md`](docs/platform-compensations.md) — NFS / Windows `--print` / macOS / Kubernetes compensating controls
 - [`docs/hook-contract.md`](docs/hook-contract.md) — Hook input/output schema, exit-code semantics, telemetry schema, audit log schema
+- [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) — Empirically verified hardening lessons: MCP / `gh` write-path bypasses, registration vs logic testing, parser bypass classes, ARG_MAX payload trap, false-positive control, prefilter performance
 - [`docs/test-results.md`](docs/test-results.md) — Original Linux + Windows e2e test evidence
 - [`docs/test-evidence.md`](docs/test-evidence.md) — Local test suite results (PII, hooks, audit chain, bypass, latency)
 
