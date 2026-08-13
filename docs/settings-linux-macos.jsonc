@@ -111,16 +111,28 @@
   "disabledMcpjsonServers": ["*"],
 
   // --- PreToolUse hooks [TESTED ✅] ---
-  // git-guard.sh    — git remote/push/reset/clean enforcement
-  // pii-guard.sh    — PII/secrets scan in tool inputs
-  // audit-logger.sh — append-only audit log
+  // git-guard.sh      — git remote/push/reset/clean enforcement
+  // gh-guard.sh       — gh CLI / gh api / curl-wget REST write policy
+  // mcp-repo-guard.sh — MCP repo-write policy (separate matcher, see below)
+  // pii-guard.sh      — PII/secrets scan in tool inputs
+  // audit-logger.sh   — append-only audit log
   "hooks": {
     "PreToolUse": [{
       "matcher": "Bash",
       "hooks": [
         { "type": "command", "command": "/usr/local/etc/claude-code/hooks/git-guard.sh" },
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/gh-guard.sh" },
         { "type": "command", "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh" },
         { "type": "command", "command": "/usr/local/etc/claude-code/hooks/audit-logger.sh" }
+      ]
+    },
+    {
+      // MCP tool calls have no "command" field and never match "Bash".
+      // Without this block the MCP write path is unguarded — Issue 13.
+      "matcher": "mcp__.*",
+      "hooks": [
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/mcp-repo-guard.sh" },
+        { "type": "command", "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh" }
       ]
     }],
     "UserPromptSubmit": [{

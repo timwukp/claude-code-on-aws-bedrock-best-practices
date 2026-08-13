@@ -60,7 +60,8 @@ New-Item -ItemType Directory -Path "$env:USERPROFILE\.claude" -Force
 
 ```bash
 sudo mkdir -p /usr/local/etc/claude-code/hooks
-sudo cp hooks/git-guard.sh hooks/pii-guard.sh hooks/audit-logger.sh \
+sudo cp hooks/git-guard.sh hooks/gh-guard.sh hooks/mcp-repo-guard.sh \
+        hooks/pii-guard.sh hooks/audit-logger.sh \
         /usr/local/etc/claude-code/hooks/
 sudo chown root:root /usr/local/etc/claude-code/hooks/*.sh
 sudo chmod 0755 /usr/local/etc/claude-code/hooks/*.sh

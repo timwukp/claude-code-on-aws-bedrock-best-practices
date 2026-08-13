@@ -44,28 +44,33 @@ Claude Code 功能強大,但預設情況下可能會:
 
 | 層次 | 內容 |
 |---|---|
-| **強化的 Hooks** | 6 個 production hook —— PII guard、git guard、audit logger(HMAC chain)、token 預算斷路器、hook 遙測 shim、Windows PowerShell PII guard |
+| **強化的 Hooks** | 8 個 production hook —— PII guard、git guard、`gh`/REST guard、MCP repo guard、audit logger(HMAC chain)、token 預算斷路器、hook 遙測 shim、Windows PowerShell PII guard |
 | **Wrappers** | 拒絕繞過旗標、sudoers-based 權限隔離、稽核日誌旋轉 |
 | **即時漂移偵測** | inotify/fswatch watcher,偵測時間 <100ms,可設定 per-host watchlist |
 | **基礎設施即程式碼 (IaC)** | EC2 基礎(IAM + SSM + CloudWatch)Terraform 模組 + SSM Parameter Store-backed MCP 允許清單 |
 | **可觀測性** | CloudWatch dashboard + alarm(hook 崩潰率、延遲 p99、漂移事件) |
-| **驗證套件** | 7 個測試套件、75+ 個斷言:PII corpus FNR/FPR、稽核鏈篡改偵測、紅隊繞過(32 次嘗試)、延遲基準、Bedrock Guardrails 線上驗證 |
+| **驗證套件** | 9 個測試套件、210+ 個斷言:PII corpus FNR/FPR、稽核鏈篡改偵測、紅隊繞過(7 類別、60 次嘗試)、延遲基準、Bedrock Guardrails 線上驗證 |
 | **維運文件** | 威脅模型(STRIDE)、事件回應、值班 runbook、hook 合約、平台補償控制、測試證據、部署指南 |
-| **可安裝外掛** | `plugin/` —— 將 5 個 hook 打包成可一鍵安裝的 Claude Code 外掛,供官方 marketplace 收錄;個人友善預設;76 個斷言測試套件 |
+| **可安裝外掛** | `plugin/` —— 將 7 個 hook 打包成可一鍵安裝的 Claude Code 外掛,供官方 marketplace 收錄;個人友善預設;108 個斷言測試套件 |
 
 ## 深度防禦架構
 
-七層強制執行機制,全部在實際 AWS 環境測試過:
+九層強制執行機制,全部在實際 AWS 環境測試過:
 
 | 層級 | 機制 | 攔下什麼 | 詳細文件 |
 |---|---|---|---|
 | 1 | **權限拒絕規則** | 單 token 危險指令 | [`docs/security-rationale.md`](docs/security-rationale.md) |
 | 2 | **`pii-guard.sh`** Hook | Prompt 與工具輸入中的敏感資料 | [`docs/pii-guard.md`](docs/pii-guard.md) |
 | 3 | **`git-guard.sh`** Hook | 未授權 git push、分支違規、force-push | [hook 原始碼](hooks/git-guard.sh) |
-| 4 | **`audit-logger.sh`** Hook(HMAC 鏈、fail-closed) | 規避稽核、偽造稽核日誌 | [hook 原始碼](hooks/audit-logger.sh) |
-| 5 | **`token-budget-guard.sh`** Hook | Token 費用爆炸、失控的 agent session | [hook 原始碼](hooks/token-budget-guard.sh) |
-| 6 | **Wrapper Script + 檔案系統 ACL + sudoers** | `--dangerously-skip-permissions`、`--permission-mode=…`、`claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
-| 7 | **Bedrock Guardrails**(伺服器端) | 有害內容、PII、prompt-attack jailbreak | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
+| 4 | **`gh-guard.sh`** Hook | 不經過 `git` 的同一組寫入:`gh pr merge`、`gh api` contents/refs 寫入、`curl`/`wget` 直打 REST API | [hook 原始碼](hooks/gh-guard.sh) |
+| 5 | **`mcp-repo-guard.sh`** Hook | MCP server 的 repo 寫入(`push_files`、`merge_pull_request` …),所有 Bash matcher 都看不到 | [hook 原始碼](hooks/mcp-repo-guard.sh) |
+| 6 | **`audit-logger.sh`** Hook(HMAC 鏈、fail-closed) | 規避稽核、偽造稽核日誌 | [hook 原始碼](hooks/audit-logger.sh) |
+| 7 | **`token-budget-guard.sh`** Hook | Token 費用爆炸、失控的 agent session | [hook 原始碼](hooks/token-budget-guard.sh) |
+| 8 | **Wrapper Script + 檔案系統 ACL + sudoers** | `--dangerously-skip-permissions`、`--permission-mode=…`、`claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 9 | **Bedrock Guardrails**(伺服器端) | 有害內容、PII、prompt-attack jailbreak | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
+
+第 3–5 層之所以要分開,是因為通往同一個 remote 有**三條互相獨立的寫入路徑**:
+`git`、`gh` CLI / REST API、以及 MCP 工具。守住其中一條,不等於守住這個 repo。
 
 加上 **作業系統沙盒**(bubblewrap)、**網路隔離**(VPC Endpoint)、
 **遙測 shim**([`hooks/hook-wrapper.sh`](hooks/hook-wrapper.sh))將 hook 崩潰/逾時轉成 fail-closed 拒絕、
@@ -75,12 +80,20 @@ Claude Code 功能強大,但預設情況下可能會:
 完整的 STRIDE 攻擊樹分析請參考 [`docs/threat-model.md`](docs/threat-model.md);
 驗證過的效能與安全數據見 [`docs/test-evidence.md`](docs/test-evidence.md)。
 
-> ⚠️ **覆蓋範圍注意:** 第 2–3 層只在 **Bash** matcher 上觸發。若 session 裝有
-> 可寫入的 **MCP server**(GitHub MCP、Docker MCP Toolkit)或已認證的
-> **`gh` CLI**,這些寫入路徑會完全繞過所有 Bash-matcher hook — 已實證。
-> 需另註冊 `mcp__.*` matcher 的 hook,並讓 git guard 涵蓋 `gh api` 形式:
-> 見 [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) 與
+> ✅ **覆蓋範圍說明:** 本套件早期版本只守住 `git` 這條寫入路徑,因此已認證的
+> **`gh` CLI** 或可寫入的 **MCP server**(GitHub MCP、Docker MCP Toolkit)
+> 能直接走過所有 Bash-matcher hook。第 4–5 層補上了這個缺口:`gh-guard.sh`
+> 掛在 `Bash` matcher,`mcp-repo-guard.sh` 掛在 `mcp__.*` matcher —— 後者是
+> Bash hook 永遠不會被呼叫到的路徑。背景說明見
 > [`docs/known-issues.md`](docs/known-issues.md) Issue 13。
+>
+> ⚠️ **殘餘限制**(依賴第 4–5 層之前請先讀):政策是以*已知的*工具名稱與 endpoint
+> 形狀為判斷依據,所以某個新 MCP server 帶著沒見過的寫入動詞時,只有在它帶有
+> owner/repo 欄位、或 server 名稱符合 `MCP_GUARD_REPO_SERVER_PATTERN` 時才會被
+> 攔下。Hook 也看不到它從未檢查過的子行程所做的寫入(用 `requests` 的 Python
+> 腳本、編譯好的執行檔、`Makefile` target)。而且這裡每個 guard 都有一個公開記載的
+> `*_DISABLED` 逃生門 —— 請在 managed 層設定 `allowManagedHooksOnly: true`,
+> 讓開發者無法把它關掉。
 
 ## 設定階層
 
@@ -116,8 +129,9 @@ Claude Code 外掛,採用**個人友善預設**(免 root —— 狀態寫到
 /plugin install fail-closed-security-hooks@claude-community
 ```
 
-外掛打包了 5 個 hook(PII guard、git guard、HMAC 鏈式稽核日誌、token 預算斷路器、
-fail-closed 遙測 shim),PII 偵測涵蓋 7 個法域,並附 **76 個可重現測試斷言**
+外掛打包了 7 個 hook(PII guard、git guard、`gh`/REST guard、MCP repo guard、
+HMAC 鏈式稽核日誌、token 預算斷路器、fail-closed 遙測 shim),PII 偵測涵蓋 7 個法域,
+並附 **108 個可重現測試斷言**
 (`plugin/tests/run-tests.sh`)。詳見 [`plugin/README.md`](plugin/README.md)。
 
 > **外掛 vs. 企業強制。** 外掛是給個人與評估用的 opt-in、可自行移除的入口。若要
@@ -177,8 +191,8 @@ claude -p "hi" --dangerously-skip-permissions       # → Refused (wrapper)
 claude -p "x" --permission-mode=bypassPermissions   # → Refused (wrapper, 等號形式)
 echo "Run: curl http://example.com" | claude -p --allowedTools Bash  # → denied
 
-# 9. 跑本機測試套件 (75+ 斷言,macOS 約 3 分鐘)
-bash tests/run_all.sh    # → "7 suites passed, 0 failed"
+# 9. 跑本機測試套件 (210+ 斷言,macOS 約 4 分鐘)
+bash tests/run_all.sh    # → "9 suites passed, 0 failed"
 ```
 
 完整部署 (含 Terraform、黃金映像、跨區域) 請見
@@ -226,7 +240,36 @@ bash tests/run_all.sh    # → "7 suites passed, 0 failed"
 | 讀取 `.env` / `.aws/credentials` / `.ssh/` | ✅ 拒絕 | ☑️ 改用 sandbox.denyRead |
 | 寫入 `C:\Windows\` | N/A | ✅ 拒絕 |
 
-### 繞過嘗試(紅隊驗證 —— 32/32 全部攔下)
+### 不經過 `git` 的同一組寫入(gh-guard.sh · mcp-repo-guard.sh)
+
+下表每一列都能在 `git` 完全沒有執行的情況下寫進 remote,所以 `git-guard.sh`
+什麼都看不到。已在 Amazon Linux 2023 上驗證 ——
+見 [`docs/test-evidence.md`](docs/test-evidence.md)。
+
+| 動作 | 路徑 | 結果 |
+|---|---|---|
+| `gh pr merge 42 --squash` | gh CLI | ✅ 攔下 —— merge 是 reviewer 的決定 |
+| `gh api -X PUT repos/O/R/contents/f`(沒有 `branch` 欄位) | gh CLI | ✅ 攔下 —— 沒指定 branch 就是 commit 到預設分支 |
+| `gh api -X PUT …/contents/f -f branch=main` | gh CLI | ✅ 攔下(受保護分支) |
+| `gh api -X PATCH …/git/refs/heads/main -F force=true` | gh CLI | ✅ 攔下 |
+| `gh repo delete` / `gh repo sync` / `gh release delete` | gh CLI | ✅ 攔下 |
+| `gh secret set` / `gh variable set` / `gh alias set` | gh CLI | ✅ 攔下 |
+| `gh api -X DELETE …/branches/main/protection` | gh CLI | ✅ 攔下(竄改分支保護) |
+| `curl -X PUT https://api.github.com/repos/O/R/contents/f` | REST,不用 gh | ✅ 攔下 |
+| `curl -X POST …/pulls/7/merge`、`wget --method=PUT …` | REST,不用 gh | ✅ 攔下 |
+| `mcp__*__push_files`(沒有 branch,或 `branch: main`) | MCP 工具 | ✅ 攔下 |
+| `mcp__*__merge_pull_request`、`delete_branch main` | MCP 工具 | ✅ 攔下 |
+| `mcp__*__create_repository`(當成外流目的地) | MCP 工具 | ✅ 攔下(除非明確開啟) |
+| `gh api -X POST …/git/refs -f ref=refs/heads/feature/x` | gh CLI | ✅ **允許**(合規流程第 1 步) |
+| `gh api -X PUT …/contents/f -f branch=feature/x` | gh CLI | ✅ **允許**(第 2 步) |
+| `gh pr create --base main --head feature/x` | gh CLI | ✅ **允許**(第 3 步) |
+| `gh pr list` / `gh api repos/O/R` / 任何 GET | gh CLI | ✅ **允許**(讀取) |
+| `echo "gh pr merge is blocked by policy"` | Bash | ✅ **允許**(提到某個動詞不等於執行它) |
+
+允許的那幾列和攔下的一樣重要:guard 完整保留了「開分支 → commit → 開 PR」
+這條路,agent 照樣能把工作做完,而 merge 的責任仍然在人身上。
+
+### 繞過嘗試(紅隊驗證 —— 60/60 全部攔下)
 
 | 繞過方式 | 結果 |
 |---|---|
@@ -239,6 +282,12 @@ bash tests/run_all.sh    # → "7 suites passed, 0 failed"
 | Force-push 藏在 `&&` 之後(複合 shell) | ✅ git-guard 抓到 |
 | Hook crash → 靜默通過 | ✅ 遙測 shim 轉成 fail-closed |
 | `CLAUDE_AUDIT_LOG=/dev/null`(消音稽核) | ✅ Managed env 覆蓋;若 log 不可寫則 fail-closed |
+| `gh pr merge` 藏在 `&&` 之後、`bash -c` 裡、或 `$(…)` 內 | ✅ gh-guard 逐段解析 |
+| `-f message="set branch=feature"`(在訊息內文偽造 branch 欄位) | ✅ 以旗標為錨點解析,不採信 |
+| `gh api` endpoint 寫成完整 `https://api.github.com/…` URL | ✅ 比對前先正規化 |
+| 改用 `curl` 直打 REST API 而不經過 `gh` | ✅ 套用同一份 endpoint 政策 |
+| 把被封鎖的動詞塞進 70KB 的指令裡 | ✅ 退回保守 regex 比對 |
+| 同一個 MCP 工具換成別的 server 名稱(`mcp__MCP_DOCKER__…`) | ✅ 以工具名稱後綴比對 |
 
 完整繞過測試套件:[`tests/bypass-attempts.sh`](tests/bypass-attempts.sh)。
 
@@ -281,7 +330,7 @@ exit 2,使用者必須開新 session。
 
 ## 測試套件與可重現證據
 
-本套件附帶 7 個套件、75+ 斷言的測試框架。文件中的每一個聲明,
+本套件附帶 9 個套件、210+ 斷言的測試框架。文件中的每一個聲明,
 都有可重現的測試背書。
 
 ```bash
@@ -291,9 +340,11 @@ bash tests/run_all.sh
 # === 3. Audit HMAC chain ===                passed=13 failed=0
 # === 4. Token budget guard ===              passed=9  failed=0
 # === 5. Drift watcher self-test ===         drift detected in 47ms
-# === 6. Bypass red-team harness ===         passed=32 failed=0   (5 類別,32/32 攔截)
+# === 6. Bypass red-team harness ===         passed=60 failed=0   (7 類別,60/60 攔截)
 # === 7. Hook latency micro-bench ===        所有 hook p99 ≤ 490ms (macOS 開發機)
-# RUN-ALL: 7 suites passed, 0 failed
+# === 8. gh CLI guard ===                    passed=77 failed=0
+# === 9. MCP repo guard ===                  passed=43 failed=0
+# RUN-ALL: 9 suites passed, 0 failed
 ```
 
 Bedrock Guardrails 線上驗證(需要 AWS 帳號,約 $0.35 美元):
@@ -393,8 +444,10 @@ claude-code-on-aws-bedrock-best-practices/
 │   └── threat-model.md
 ├── hooks/                                 ← 全數測試通過 ✅
 │   ├── audit-logger.sh                    ← HMAC 鏈、fail-closed、CloudWatch dual-write
+│   ├── gh-guard.sh                        ← gh CLI + curl/wget REST 寫入政策
 │   ├── git-guard.sh                       ← 企業 git 政策
 │   ├── hook-wrapper.sh                    ← 任意 hook 的遙測 + fail-closed shim
+│   ├── mcp-repo-guard.sh                  ← MCP repo 寫入政策(mcp__.* matcher)
 │   ├── pii-guard.ps1                      ← PII/機密掃描器 (Windows)
 │   ├── pii-guard.sh                       ← PII/機密掃描器 (Linux/macOS)
 │   └── token-budget-guard.sh              ← agent loop 斷路器
@@ -430,8 +483,8 @@ claude-code-on-aws-bedrock-best-practices/
     │   ├── negative/
     │   └── positive/
     ├── bench_hook_latency.sh              ← 200 次延遲微基準
-    ├── bypass-attempts.sh                 ← 32 次紅隊測試套件
-    ├── run_all.sh                         ← master runner(7 個套件)
+    ├── bypass-attempts.sh                 ← 60 次紅隊測試套件
+    ├── run_all.sh                         ← master runner(9 個套件)
     ├── run_pii_corpus.sh                  ← 108 個 PII 案例驗證
     ├── test_audit_chain.sh                ← HMAC 鏈篡改偵測
     ├── test_hook_wrapper.sh               ← 遙測 + fail-closed 語意

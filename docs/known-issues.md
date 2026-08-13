@@ -390,33 +390,60 @@ Not a bug — matcher semantics. The hooks in this kit register with
 ever sees them. `git-guard.sh` additionally exits 0 for any non-Bash
 `tool_name` by design.
 
-### Workaround
+### Fix (shipped in this kit)
 
-Register a second PreToolUse entry with an MCP matcher and a guard that reads
-the structured fields:
+Two hooks now cover the two uncovered write paths:
+
+| Hook | Matcher | Covers |
+|---|---|---|
+| [`hooks/mcp-repo-guard.sh`](../hooks/mcp-repo-guard.sh) | `mcp__.*` | `push_files`, `create_or_update_file`, `delete_file`, `merge_pull_request`, `delete_branch`, `update_ref`, repo/release deletion, transfer, secret writes |
+| [`hooks/gh-guard.sh`](../hooks/gh-guard.sh) | `Bash` | `gh pr merge`, `gh api` contents/refs/protection/secret writes, `gh repo delete\|sync\|archive\|transfer`, and `curl`/`wget` straight to `api.github.com` or a `/api/v3/` Enterprise host |
+
+Registration (both go through the fail-closed telemetry shim in a real
+deployment — see [`plugin/hooks/hooks.json`](../plugin/hooks/hooks.json)):
 
 ```jsonc
 "PreToolUse": [
-  { "matcher": "Bash",    "hooks": [ /* existing */ ] },
+  { "matcher": "Bash",    "hooks": [ /* pii-guard, git-guard, gh-guard */ ] },
   { "matcher": "mcp__.*", "hooks": [ { "type": "command",
       "command": "/usr/local/etc/claude-code/hooks/mcp-repo-guard.sh" } ] }
 ]
 ```
 
-Match on the tool-name *suffix* (`push_files`, `merge_pull_request`, …), not
-the full name — the `<server>` segment varies per machine. Apply the same
-branch-protection policy to `tool_input.branch` (absent ⇒ default branch) and
-run the same PII/secret patterns over every content field, imported from a
-shared module rather than copied.
+Three implementation notes that the tests pin down, because each one is a way
+to write a guard that looks correct and enforces nothing:
+
+1. **Match on the tool-name *suffix*** (`push_files`, `merge_pull_request`, …),
+   never the full name — the `<server>` segment differs per machine
+   (`mcp__github__`, `mcp__MCP_DOCKER__`, `mcp__gh-enterprise__`). Covered by
+   the server-name-independence cases in
+   [`tests/test_mcp_repo_guard.sh`](../tests/test_mcp_repo_guard.sh).
+2. **An absent `branch` is not a safe default** — the contents API and every
+   MCP write tool commit to the repository *default* branch when `branch` is
+   omitted, so "no branch specified" must deny, not allow. A body the hook
+   cannot read (`--input <file>`, `curl -d @body.json`) is treated the same way.
+3. **Content scanning is not duplicated here.** `pii-guard.sh` already scans
+   `tool_input` for every tool, MCP included; these two hooks implement *write
+   policy* only.
 
 Verification caveat: piping test payloads into the guard proves its logic but
 not its registration. Confirm liveness against a *real* MCP call in a live
 session (any read-only tool) — see
 [`docs/hook-hardening-lessons.md`](hook-hardening-lessons.md) §3.
+`mcp-repo-guard.sh` writes `MCP_GUARD_LIVENESS_FILE` *before* it checks
+`MCP_GUARD_DISABLED`, so the liveness record survives even when policy is
+switched off.
 
 ### Status
 
-- Matcher semantics, present in all versions tested (2.1.150–2.1.15x)
-- Same gap applies to `gh` CLI / `gh api` / `curl` REST writes, which are Bash
-  commands but not `git` subcommands — `git-guard.sh` does not inspect them
-  ([`docs/hook-hardening-lessons.md`](hook-hardening-lessons.md) §2)
+- **Closed in this kit** (hooks above; 120 assertions across
+  `tests/test_gh_guard.sh` and `tests/test_mcp_repo_guard.sh`, plus 28
+  red-team rows in `tests/bypass-attempts.sh`)
+- Matcher semantics themselves are unchanged upstream — present in all versions
+  tested (2.1.150–2.1.15x). A kit that registers only `"matcher": "Bash"` still
+  has the gap.
+- The `gh` CLI / `gh api` / `curl` half of the same gap
+  ([`docs/hook-hardening-lessons.md`](hook-hardening-lessons.md) §2) is covered
+  by `gh-guard.sh`. Residual: writes from a subprocess the hook never inspects
+  (a Python script using `requests`, a compiled binary) remain out of reach for
+  any PreToolUse hook.

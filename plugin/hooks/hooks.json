@@ -1,5 +1,5 @@
 {
-  "description": "Enterprise security controls for Claude Code on Amazon Bedrock: PII/secrets guard, git policy guard, tamper-evident HMAC-chained audit log, token-budget circuit breaker — all wrapped by a fail-closed telemetry shim. Opt-in defaults write to ~/.claude/claude-code-security; for un-removable enterprise enforcement deploy via managed-settings + IaC (see homepage).",
+  "description": "Enterprise security controls for Claude Code on Amazon Bedrock: PII/secrets guard, repo-write policy across all three write paths (git, gh CLI, MCP), tamper-evident HMAC-chained audit log, token-budget circuit breaker — all wrapped by a fail-closed telemetry shim. Opt-in defaults write to ~/.claude/claude-code-security; for un-removable enterprise enforcement deploy via managed-settings + IaC (see homepage).",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -24,6 +24,21 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-wrapper.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/git-guard.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-wrapper.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/gh-guard.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-wrapper.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-repo-guard.sh\"",
             "timeout": 10
           }
         ]

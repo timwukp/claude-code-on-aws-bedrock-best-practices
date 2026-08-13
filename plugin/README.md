@@ -6,12 +6,14 @@
 
 ## What it does
 
-Five hooks, wired through a fail-closed telemetry shim:
+Seven hooks, wired through a fail-closed telemetry shim:
 
 | Hook | Event(s) | What it enforces |
 |---|---|---|
 | **pii-guard** | `UserPromptSubmit`, `PreToolUse` | Scans prompts and tool inputs for secrets (AWS keys, private keys, JWTs, DB connection strings, credit cards) **and national identifiers across the US, UK, Japan, South Korea, Singapore, EU (IBAN), and Australia**, then **blocks before the content reaches the model**. Every pattern is individually disable-able. |
 | **git-guard** | `PreToolUse` (Bash) | Remote-URL allowlist, force-push prevention, protected-branch enforcement, and destructive-op blocking (`reset --hard`, `clean -f`, forced checkout). |
+| **gh-guard** | `PreToolUse` (Bash) | The same repo writes that never invoke `git`: `gh pr merge`, `gh api` writes to `contents/`, `git/refs`, branch protection, collaborators and Actions secrets, `gh repo delete\|sync\|archive\|transfer`, `gh secret\|variable\|alias set`, and `curl`/`wget` straight to `api.github.com` or a `/api/v3/` Enterprise host. The sanctioned branch → commit → pull-request flow stays open. |
+| **mcp-repo-guard** | `PreToolUse` (`mcp__.*`) | Repo writes from MCP servers, which **no `Bash`-matcher hook is ever invoked for**: `push_files`, `create_or_update_file`, `delete_file`, `merge_pull_request`, `delete_branch`, `update_ref`, repo/release deletion, transfer, secret writes. Matches on the tool-name suffix, so it works whatever the `mcp__<server>__` segment is. |
 | **audit-logger** | `UserPromptSubmit`, `PostToolUse` | **Tamper-evident HMAC-SHA256 hash-chained** JSONL audit log. Any post-hoc edit, deletion, reorder, or insertion breaks the chain forward and is caught by `chain-verify.sh`. Optional dual-write to CloudWatch + SIEM webhook. |
 | **token-budget-guard** | `PreToolUse`, `PostToolUse` | Per-session circuit breaker. Blocks further tool calls once a token or call budget is exceeded — a backstop against runaway agent loops. |
 | **hook-wrapper** | (wraps all of the above) | Telemetry shim. Emits per-hook timing/exit JSON and **converts silent hook crashes/timeouts into explicit `exit 2` denials** (fail-closed), so a broken control fails *safe* instead of failing *open*. |
@@ -42,10 +44,10 @@ Or browse `/plugin > Discover`.
 
 ## Verify the claims yourself
 
-Every claim above is reproducible. Run the bundled suite (76 assertions, isolated sandbox, no network/root needed):
+Every claim above is reproducible. Run the bundled suite (108 assertions, isolated sandbox, no network/root needed):
 
 ```bash
-bash tests/run-tests.sh        # → RESULT: 76 passed, 0 failed
+bash tests/run-tests.sh        # → RESULT: 108 passed, 0 failed
 ```
 
 See [`tests/TEST_REPORT.md`](./tests/TEST_REPORT.md) for the method and full results. Or verify the headline differentiator — the tamper-evident audit chain — by hand:

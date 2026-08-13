@@ -33,6 +33,10 @@ zero hook invocations.
 
 ### Fix: a second hook on an `mcp__.*` matcher
 
+Reference implementation: [`hooks/mcp-repo-guard.sh`](../hooks/mcp-repo-guard.sh)
+(policy) and [`tests/test_mcp_repo_guard.sh`](../tests/test_mcp_repo_guard.sh)
+(43 assertions, including server-name independence).
+
 ```jsonc
 "PreToolUse": [
   { "matcher": "Bash",    "hooks": [ /* existing guards */ ] },
@@ -85,6 +89,11 @@ it?*
 If the box has an authenticated `gh` (or a `GITHUB_TOKEN` usable by `curl`),
 the guard must cover these forms, or an agent that is blocked on `git push`
 will discover — or be told by its error output — that `gh api` works.
+
+Reference implementation: [`hooks/gh-guard.sh`](../hooks/gh-guard.sh) and
+[`tests/test_gh_guard.sh`](../tests/test_gh_guard.sh) (77 assertions). It shares
+one endpoint-policy function between the `gh api` and `curl`/`wget` paths, so the
+two cannot drift apart.
 
 Details that matter when you implement it (each one was a working bypass until
 fixed):
@@ -266,7 +275,7 @@ every `ls`. Three changes cut the non-matching path to ~40 ms combined:
    ```bash
    IFS= read -r -d '' PAYLOAD          # builtin read; $(cat) forks per call
    case "$PAYLOAD" in
-     *git*|*gh*) ;;                    # possibly relevant → run the real guard
+     *git*|*gh*|*github*|*api/v3*) ;;  # possibly relevant → run the real guard
      *) exit 0 ;;
    esac
    ```
@@ -276,6 +285,12 @@ every `ls`. Three changes cut the non-matching path to ~40 ms combined:
    in the real guard. What matters is that `ls`, `npm test`, etc. never pay
    interpreter startup. (An in-interpreter gate saves nothing — startup is the
    cost.)
+
+   `*github*` is not redundant with `*gh*`: **"github" does not contain the
+   substring "gh"** — the letters are g-i-t-h-u-b. A prefilter of `*git*|*gh*`
+   happens to catch `api.github.com` through `*git*`, but drop the `git` pattern
+   (as a gh-only guard reasonably would) and every `curl` to the REST API
+   silently skips the guard while the whole suite still looks green. See §9.
 
 2. **`python3 -I`** (isolated mode) — skips `site`/user-site and ignores
    `PYTHON*` env vars: ~20 ms faster startup, and a broken `PYTHONPATH` or
@@ -287,6 +302,59 @@ every `ls`. Three changes cut the non-matching path to ~40 ms combined:
 
 This complements the contract's <200 ms p95 budget: the budget is met not by
 making the guard fast but by not running it at all for irrelevant calls.
+
+---
+
+## 9. The reference implementation broke twice — both only on Linux
+
+The two guards this document describes now ship in the kit
+([`hooks/gh-guard.sh`](../hooks/gh-guard.sh),
+[`hooks/mcp-repo-guard.sh`](../hooks/mcp-repo-guard.sh)). Both were written and
+unit-tested on macOS, then run on Amazon Linux 2023 (bash 5.2.15, jq 1.8.1)
+before being trusted. Two defects surfaced only there, and both had the same
+shape: **the guard exits 0 and every ALLOW test still passes**, so a suite that
+only counts failures reports success.
+
+**(a) `local a="$1" b=${#a}` is fatal under `set -u`.** Bash expands *all*
+arguments to `local` before assigning any of them, so `${#a}` reads `a` while it
+is still unset:
+
+```bash
+tokenize() {
+  local s="$1" n=${#s}     # ✗ "s: unbound variable" — the function aborts
+}
+tokenize() {
+  local s="$1"             # ✓ two statements
+  local n=${#s} i=0
+}
+```
+
+bash 3.2 (the macOS default) tolerates this; bash 5.2 under `set -u` kills the
+function. The parser aborted on its first call, the hook fell through to
+`exit 0`, and it fail-*opened* on every command — 5 of 56 cases passing, but
+the visible symptom was ALLOW tests failing, not writes being permitted.
+
+**(b) The prefilter did not match its own primary target.** The guard's cheap
+gate was `case "$command_str" in *gh*|*api/v3*)`, with a comment asserting that
+`*gh*` "also covers github in a URL". It does not (§8). Every
+`curl … https://api.github.com/…` case returned exit 0 without the guard ever
+parsing anything. The only reason this was caught is that the suite contained
+one GitHub Enterprise case whose host matched `*api/v3*` and blocked correctly —
+a single passing sibling next to seven failures is what pointed at the gate
+rather than at the policy.
+
+Three practices come out of this:
+
+- **Run the suite on the platform you deploy to, not the one you write on.**
+  Both bugs are invisible on macOS. An ephemeral instance plus a remote runner
+  (SSM `RunShellScript`, no inbound access, terminated after) is enough.
+- **Test that ALLOW cases are allowed for the right reason.** A hook that
+  crashes early passes every ALLOW assertion. Pair each one with a BLOCK case
+  that shares its code path, and assert on the *stderr text* — not just the
+  exit code — so a fail-open cannot masquerade as a pass.
+- **A pattern in a comment is a claim; check it.** `bash -x` over one failing
+  payload located both bugs in under a minute, after code review had missed
+  them twice.
 
 ---
 
@@ -308,3 +376,8 @@ making the guard fast but by not running it at all for irrelevant calls.
 - [ ] Every fail-open is logged with a reason; non-0/2 exit behaviour is an
       explicit per-hook decision.
 - [ ] Non-matching tool calls exit before any interpreter starts.
+- [ ] The suite runs on the deployment platform (Linux bash 5.x under `set -u`),
+      not only on the author's machine — see §9 for two fail-open bugs that
+      exist nowhere else.
+- [ ] Prefilter patterns are verified against a real payload for each covered
+      path (`*gh*` does **not** match `github`).

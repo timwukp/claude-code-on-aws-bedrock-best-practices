@@ -2,9 +2,10 @@
 # =============================================================================
 # Test suite for fail-closed-security-hooks plugin
 # =============================================================================
-# Comprehensive, reproducible assertion suite covering all 5 hooks, the chain
-# verifier, every PII pattern, all git-guard checks, both budget dimensions,
-# the wrapper's full exit-code matrix, and chain tamper modes.
+# Comprehensive, reproducible assertion suite covering all 7 hooks, the chain
+# verifier, every PII pattern, all git-guard checks, the gh CLI and MCP write
+# paths, both budget dimensions, the wrapper's full exit-code matrix, and chain
+# tamper modes.
 #
 # Usage:   bash tests/run-tests.sh
 # Exit:    0 if all assertions pass, 1 otherwise.
@@ -18,6 +19,8 @@ HOOKS="$ROOT/hooks"
 SCRIPTS="$ROOT/scripts"
 PII="$HOOKS/pii-guard.sh"
 GIT="$HOOKS/git-guard.sh"
+GHG="$HOOKS/gh-guard.sh"
+MRG="$HOOKS/mcp-repo-guard.sh"
 WRAP="$HOOKS/hook-wrapper.sh"
 AUDIT="$HOOKS/audit-logger.sh"
 TOKEN="$HOOKS/token-budget-guard.sh"
@@ -205,7 +208,43 @@ awk 'NR==2{l2=$0;next} NR==3{print $0;print l2;next} {print}' "$LOG" > "$LOG.reo
 assert_exit 1 "reorder detected" "" "$VERIFY" "$LOG.reorder"
 
 echo
-echo "[11] JSON validity"
+echo "[11] gh-guard — the gh CLI write path (git-guard sees none of these)"
+assert_exit 2 "gh pr merge"                '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1 --squash"}}' "$GHG"
+assert_exit 2 "contents PUT, no branch"    '{"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/o/r/contents/f -f content=YWJj"}}' "$GHG"
+assert_exit 2 "contents PUT to main"       '{"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/o/r/contents/f -f branch=main -f content=YWJj"}}' "$GHG"
+assert_exit 2 "quoted branch= in message"  '{"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/o/r/contents/f -f message=\"set branch=feature\" -f content=YWJj"}}' "$GHG"
+assert_exit 2 "refs PATCH on main"         '{"tool_name":"Bash","tool_input":{"command":"gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=dead"}}' "$GHG"
+assert_exit 2 "gh repo delete"             '{"tool_name":"Bash","tool_input":{"command":"gh repo delete o/r --yes"}}' "$GHG"
+assert_exit 2 "gh secret set"              '{"tool_name":"Bash","tool_input":{"command":"gh secret set K --body v"}}' "$GHG"
+assert_exit 2 "hidden after &&"            '{"tool_name":"Bash","tool_input":{"command":"echo ok && gh pr merge 1"}}' "$GHG"
+assert_exit 2 "inside bash -c"             '{"tool_name":"Bash","tool_input":{"command":"bash -c \"gh pr merge 1\""}}' "$GHG"
+assert_exit 0 "gh pr create allowed"       '{"tool_name":"Bash","tool_input":{"command":"gh pr create --base main --head f/x --title t --body b"}}' "$GHG"
+assert_exit 0 "feature-branch write"       '{"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/o/r/contents/f -f branch=f/x -f content=YWJj"}}' "$GHG"
+assert_exit 0 "GET is a read"              '{"tool_name":"Bash","tool_input":{"command":"gh api repos/o/r --jq .default_branch"}}' "$GHG"
+assert_exit 0 "echo mentioning the verb"   '{"tool_name":"Bash","tool_input":{"command":"echo \"gh pr merge is blocked\""}}' "$GHG"
+assert_exit 0 "non-Bash tool ignored"      '{"tool_name":"Read","tool_input":{"file_path":"x"}}' "$GHG"
+GH_GUARD_DISABLED=true assert_exit 0 "emergency disable bypasses all" '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"}}' "$GHG"
+
+echo
+echo "[12] mcp-repo-guard — the MCP write path (no command field to regex)"
+assert_exit 2 "push_files, no branch"      '{"tool_name":"mcp__github__push_files","tool_input":{"owner":"o","repo":"r","files":[]}}' "$MRG"
+assert_exit 2 "push_files to main"         '{"tool_name":"mcp__github__push_files","tool_input":{"owner":"o","repo":"r","branch":"main","files":[]}}' "$MRG"
+assert_exit 2 "refs/heads/main spelling"   '{"tool_name":"mcp__github__create_or_update_file","tool_input":{"owner":"o","repo":"r","branch":"refs/heads/main","path":"a"}}' "$MRG"
+assert_exit 2 "merge_pull_request"         '{"tool_name":"mcp__github__merge_pull_request","tool_input":{"owner":"o","repo":"r","pullNumber":1}}' "$MRG"
+assert_exit 2 "other server segment"       '{"tool_name":"mcp__MCP_DOCKER__push_files","tool_input":{"owner":"o","repo":"r","branch":"main","files":[]}}' "$MRG"
+assert_exit 2 "create_repository"          '{"tool_name":"mcp__github__create_repository","tool_input":{"name":"exfil"}}' "$MRG"
+assert_exit 2 "delete protected branch"    '{"tool_name":"mcp__github__delete_branch","tool_input":{"owner":"o","repo":"r","branch":"main"}}' "$MRG"
+assert_exit 0 "create_branch allowed"      '{"tool_name":"mcp__github__create_branch","tool_input":{"owner":"o","repo":"r","branch":"f/x"}}' "$MRG"
+assert_exit 0 "feature-branch write"       '{"tool_name":"mcp__github__push_files","tool_input":{"owner":"o","repo":"r","branch":"f/x","files":[]}}' "$MRG"
+assert_exit 0 "create_pull_request"        '{"tool_name":"mcp__github__create_pull_request","tool_input":{"owner":"o","repo":"r","base":"main","head":"f/x"}}' "$MRG"
+assert_exit 0 "read tool"                  '{"tool_name":"mcp__github__get_file_contents","tool_input":{"owner":"o","repo":"r","path":"a"}}' "$MRG"
+assert_exit 0 "non-repo server delete"     '{"tool_name":"mcp__filesystem__delete_file","tool_input":{"path":"/tmp/x"}}' "$MRG"
+assert_exit 0 "Bash call not our business" '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"}}' "$MRG"
+MCP_GUARD_ALLOWED_OWNERS=acme assert_exit 2 "owner outside allowlist" '{"tool_name":"mcp__github__create_or_update_file","tool_input":{"owner":"attacker","repo":"r","branch":"f/x","path":"a"}}' "$MRG"
+MCP_GUARD_DISABLED=true assert_exit 0 "emergency disable bypasses all" '{"tool_name":"mcp__github__push_files","tool_input":{"owner":"o","repo":"r","branch":"main","files":[]}}' "$MRG"
+
+echo
+echo "[13] JSON validity"
 if command -v jq >/dev/null 2>&1; then
   for j in "$ROOT/.claude-plugin/plugin.json" "$HOOKS/hooks.json"; do
     if jq empty "$j" 2>/dev/null; then printf '  ✅ %-46s\n' "$(basename "$j") valid"; PASS=$((PASS+1));

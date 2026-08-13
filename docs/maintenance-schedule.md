@@ -34,6 +34,19 @@ echo '{"hook_event_name":"UserPromptSubmit","prompt":"card 4111-1111-1111-1111"}
   /usr/local/etc/claude-code/hooks/pii-guard.sh 2>/dev/null
 [[ $? -eq 2 ]] && echo "PASS" || echo "FAIL: pii-guard not blocking"
 
+echo "=== 3b. gh-guard blocks a repo write that never runs git ==="
+echo '{"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/o/r/contents/f -f branch=main -f content=YWJj"}}' | \
+  /usr/local/etc/claude-code/hooks/gh-guard.sh 2>/dev/null
+[[ $? -eq 2 ]] && echo "PASS" || echo "FAIL: gh-guard not blocking"
+
+echo "=== 3c. mcp-repo-guard blocks an MCP write to main ==="
+# Registration matters as much as logic here: if this passes but a real MCP call
+# in a live session leaves no MCP_GUARD_LIVENESS_FILE entry, the hook is not
+# registered on the mcp__.* matcher and enforces nothing.
+echo '{"tool_name":"mcp__github__push_files","tool_input":{"owner":"o","repo":"r","branch":"main","files":[]}}' | \
+  /usr/local/etc/claude-code/hooks/mcp-repo-guard.sh 2>/dev/null
+[[ $? -eq 2 ]] && echo "PASS" || echo "FAIL: mcp-repo-guard not blocking"
+
 echo "=== 4. Wrapper blocks bypass flag ==="
 result=$(claude -p "hi" --dangerously-skip-permissions 2>&1)
 echo "$result" | grep -q "Refused" && echo "PASS" || echo "FAIL: wrapper not blocking"

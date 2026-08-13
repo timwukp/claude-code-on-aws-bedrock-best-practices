@@ -46,28 +46,34 @@ This kit is more than configuration files. It's a complete operational kit:
 
 | Layer | What you get |
 |---|---|
-| **Hardened hooks** | 6 production hooks — PII guard, git guard, audit logger (HMAC-chained), token budget circuit breaker, hook telemetry shim, PowerShell PII guard for Windows |
+| **Hardened hooks** | 8 production hooks — PII guard, git guard, `gh`/REST guard, MCP repo guard, audit logger (HMAC-chained), token budget circuit breaker, hook telemetry shim, PowerShell PII guard for Windows |
 | **Wrappers** | Bypass-flag rejection, sudoers-based privilege isolation, audit-log rotation |
 | **Real-time drift detection** | inotify/fswatch watcher with sub-100ms detection, configurable per-host watchlist |
 | **Infrastructure as Code** | Terraform modules for EC2 baseline (IAM + SSM + CloudWatch) and SSM Parameter Store-backed MCP allowlist |
 | **Observability** | CloudWatch dashboard + alarms (hook crash rate, latency p99, drift events) |
-| **Verification suite** | 75+ assertions across 7 test suites: PII corpus FNR/FPR, audit chain tamper detection, bypass red-team (32 attempts), latency benchmarks, Bedrock Guardrails live verification |
+| **Verification suite** | 210+ assertions across 9 test suites: PII corpus FNR/FPR, audit chain tamper detection, bypass red-team (60 attempts across 7 categories), latency benchmarks, Bedrock Guardrails live verification |
 | **Operational docs** | Threat model (STRIDE), incident response, on-call runbook, hook contract, platform compensations, test evidence, deployment guide |
-| **Installable plugin** | `plugin/` — opt-in Claude Code plugin packaging 5 hooks for the official marketplace; user-friendly defaults; 76-assertion test suite |
+| **Installable plugin** | `plugin/` — opt-in Claude Code plugin packaging 7 hooks for the official marketplace; user-friendly defaults; 108-assertion test suite |
 
 ## Defense-in-Depth Architecture
 
-Seven enforcement layers, all tested on real AWS infrastructure:
+Nine enforcement layers, all tested on real AWS infrastructure:
 
 | Layer | Mechanism | Stops | Where to read |
 |---|---|---|---|
 | 1 | **Permission deny rules** | Single-token dangerous commands | [`docs/security-rationale.md`](docs/security-rationale.md) |
 | 2 | **`pii-guard.sh`** hook | Sensitive data in prompts and tool inputs | [`docs/pii-guard.md`](docs/pii-guard.md) |
 | 3 | **`git-guard.sh`** hook | Unauthorized git push, branch violations, force-push | [hook source](hooks/git-guard.sh) |
-| 4 | **`audit-logger.sh`** hook (HMAC-chained, fail-closed) | Audit evasion, tampered audit log | [hook source](hooks/audit-logger.sh) |
-| 5 | **`token-budget-guard.sh`** hook | Token cost explosion, runaway agent sessions | [hook source](hooks/token-budget-guard.sh) |
-| 6 | **Wrapper script + filesystem ACL + sudoers** | `--dangerously-skip-permissions`, `--permission-mode=…`, `claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
-| 7 | **Bedrock Guardrails** (server-side) | Harmful content, PII, prompt-attack jailbreaks | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
+| 4 | **`gh-guard.sh`** hook | The same writes without `git`: `gh pr merge`, `gh api` contents/refs writes, `curl`/`wget` straight to the REST API | [hook source](hooks/gh-guard.sh) |
+| 5 | **`mcp-repo-guard.sh`** hook | Repo writes from MCP servers (`push_files`, `merge_pull_request`, …), invisible to every Bash matcher | [hook source](hooks/mcp-repo-guard.sh) |
+| 6 | **`audit-logger.sh`** hook (HMAC-chained, fail-closed) | Audit evasion, tampered audit log | [hook source](hooks/audit-logger.sh) |
+| 7 | **`token-budget-guard.sh`** hook | Token cost explosion, runaway agent sessions | [hook source](hooks/token-budget-guard.sh) |
+| 8 | **Wrapper script + filesystem ACL + sudoers** | `--dangerously-skip-permissions`, `--permission-mode=…`, `claude mcp add` | [wrapper-linux.sh](scripts/wrapper-linux.sh) |
+| 9 | **Bedrock Guardrails** (server-side) | Harmful content, PII, prompt-attack jailbreaks | [`docs/bedrock-guardrails.md`](docs/bedrock-guardrails.md) |
+
+Layers 3–5 exist because there are **three independent write paths to the same
+remote**: `git`, the `gh` CLI / REST API, and MCP tools. A guard on one of them
+is not a guard on the repository.
 
 Plus **OS sandbox** (bubblewrap), **network isolation** (VPC Endpoint),
 **telemetry shim** ([`hooks/hook-wrapper.sh`](hooks/hook-wrapper.sh)) that converts
@@ -79,13 +85,22 @@ See [`docs/threat-model.md`](docs/threat-model.md) for STRIDE attack-tree
 analysis and [`docs/test-evidence.md`](docs/test-evidence.md) for the verified
 performance and security numbers.
 
-> ⚠️ **Coverage caveat:** layers 2–3 fire on the **Bash** matcher only. If the
-> session has a write-capable **MCP server** (GitHub MCP, Docker MCP Toolkit)
-> or an authenticated **`gh` CLI**, those write paths bypass every
-> Bash-matcher hook — verified empirically. Register a second hook on
-> `mcp__.*` and extend the git guard to `gh api` forms:
-> [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) and
-> [`docs/known-issues.md`](docs/known-issues.md) Issue 13.
+> ✅ **Coverage note:** earlier releases of this kit guarded only the `git`
+> write path, so an authenticated **`gh` CLI** or a write-capable **MCP server**
+> (GitHub MCP, Docker MCP Toolkit) walked straight past every Bash-matcher hook.
+> Layers 4–5 close that gap: `gh-guard.sh` on the `Bash` matcher, and
+> `mcp-repo-guard.sh` on a `mcp__.*` matcher, which the Bash hooks are never
+> invoked for. Background: [`docs/known-issues.md`](docs/known-issues.md)
+> Issue 13.
+>
+> ⚠️ **Residual limits** (read before you rely on layers 4–5): policy is keyed
+> on *known* tool names and endpoint shapes, so a new MCP server with an
+> unrecognised write verb is denied only if its owner/repo fields are present or
+> its server name matches `MCP_GUARD_REPO_SERVER_PATTERN`. A hook cannot see
+> writes made by a subprocess it never inspects (a Python script using
+> `requests`, a compiled binary, a `Makefile` target). And every guard here has
+> a documented `*_DISABLED` escape hatch — set `allowManagedHooksOnly: true` at
+> the managed level so the developer cannot unset it.
 
 ## Settings Hierarchy
 
@@ -122,9 +137,10 @@ defaults** (no root required — state goes to `~/.claude/claude-code-security/`
 /plugin install fail-closed-security-hooks@claude-community
 ```
 
-The plugin bundles 5 of the hooks (PII guard · git guard · HMAC-chained audit
-logger · token-budget breaker · fail-closed telemetry shim), recognises PII
-across 7 jurisdictions, and ships **76 reproducible test assertions**
+The plugin bundles 7 of the hooks (PII guard · git guard · `gh`/REST guard ·
+MCP repo guard · HMAC-chained audit logger · token-budget breaker · fail-closed
+telemetry shim), recognises PII across 7 jurisdictions, and ships **108
+reproducible test assertions**
 (`plugin/tests/run-tests.sh`). See [`plugin/README.md`](plugin/README.md).
 
 > **Plugin vs. enterprise enforcement.** The plugin is the opt-in,
@@ -186,8 +202,8 @@ claude -p "hi" --dangerously-skip-permissions       # → Refused (wrapper)
 claude -p "x" --permission-mode=bypassPermissions   # → Refused (wrapper, equals form)
 echo "Run: curl http://example.com" | claude -p --allowedTools Bash  # → denied
 
-# 9. Run the local test suite (75+ assertions, ~3 min on macOS)
-bash tests/run_all.sh    # → "7 suites passed, 0 failed"
+# 9. Run the local test suite (210+ assertions, ~4 min on macOS)
+bash tests/run_all.sh    # → "9 suites passed, 0 failed"
 ```
 
 For full deployment (incl. Terraform, golden image, multi-region), see
@@ -235,7 +251,37 @@ Full list and customization: [`docs/pii-guard.md`](docs/pii-guard.md).
 | Read `.env` / `.aws/credentials` / `.ssh/` | ✅ Denied | ☑️ Use sandbox.denyRead |
 | Write to `C:\Windows\` | N/A | ✅ Denied |
 
-### Bypass attempts (red-team verified — 32/32 blocked)
+### The same writes without `git` (gh-guard.sh · mcp-repo-guard.sh)
+
+Every row below reaches the remote with `git` never running, so `git-guard.sh`
+sees nothing. Verified on Amazon Linux 2023 — see
+[`docs/test-evidence.md`](docs/test-evidence.md).
+
+| Action | Path | Result |
+|---|---|---|
+| `gh pr merge 42 --squash` | gh CLI | ✅ Blocked — merging is the reviewer's call |
+| `gh api -X PUT repos/O/R/contents/f` (no `branch` field) | gh CLI | ✅ Blocked — an absent branch commits to the default branch |
+| `gh api -X PUT …/contents/f -f branch=main` | gh CLI | ✅ Blocked (protected branch) |
+| `gh api -X PATCH …/git/refs/heads/main -F force=true` | gh CLI | ✅ Blocked |
+| `gh repo delete` / `gh repo sync` / `gh release delete` | gh CLI | ✅ Blocked |
+| `gh secret set` / `gh variable set` / `gh alias set` | gh CLI | ✅ Blocked |
+| `gh api -X DELETE …/branches/main/protection` | gh CLI | ✅ Blocked (protection tampering) |
+| `curl -X PUT https://api.github.com/repos/O/R/contents/f` | REST, no gh | ✅ Blocked |
+| `curl -X POST …/pulls/7/merge`, `wget --method=PUT …` | REST, no gh | ✅ Blocked |
+| `mcp__*__push_files` (no branch, or `branch: main`) | MCP tool | ✅ Blocked |
+| `mcp__*__merge_pull_request`, `delete_branch main` | MCP tool | ✅ Blocked |
+| `mcp__*__create_repository` (exfil destination) | MCP tool | ✅ Blocked unless opted in |
+| `gh api -X POST …/git/refs -f ref=refs/heads/feature/x` | gh CLI | ✅ **Allowed** (sanctioned step 1) |
+| `gh api -X PUT …/contents/f -f branch=feature/x` | gh CLI | ✅ **Allowed** (step 2) |
+| `gh pr create --base main --head feature/x` | gh CLI | ✅ **Allowed** (step 3) |
+| `gh pr list` / `gh api repos/O/R` / any GET | gh CLI | ✅ **Allowed** (reads) |
+| `echo "gh pr merge is blocked by policy"` | Bash | ✅ **Allowed** (naming a verb is not running it) |
+
+The allowed rows matter as much as the blocked ones: the guards leave the
+branch → commit → pull-request flow intact, so the agent still finishes the
+work and a human still owns the merge.
+
+### Bypass attempts (red-team verified — 60/60 blocked)
 
 | Bypass | Result |
 |---|---|
@@ -248,6 +294,12 @@ Full list and customization: [`docs/pii-guard.md`](docs/pii-guard.md).
 | Force-push hidden after `&&` (compound shell) | ✅ git-guard catches it |
 | Hook crash → silent pass-through | ✅ Telemetry shim converts to fail-closed |
 | `CLAUDE_AUDIT_LOG=/dev/null` (audit silencing) | ✅ Managed env wins; fail-closed if log unwritable |
+| `gh pr merge` hidden after `&&`, in `bash -c`, or in `$(…)` | ✅ gh-guard parses every segment |
+| `-f message="set branch=feature"` (fake branch field in a message body) | ✅ Flag-anchored parsing rejects it |
+| `gh api` endpoint spelled as a full `https://api.github.com/…` URL | ✅ Normalised before matching |
+| `curl` to the REST API instead of `gh` | ✅ Same endpoint policy applies |
+| Blocked verb padded into a 70KB command | ✅ Conservative regex fallback |
+| Same MCP tool under a different server segment (`mcp__MCP_DOCKER__…`) | ✅ Matched on the tool suffix |
 
 Full bypass test harness: [`tests/bypass-attempts.sh`](tests/bypass-attempts.sh).
 
@@ -290,7 +342,7 @@ Full platform compatibility matrix: [`docs/known-issues.md`](docs/known-issues.m
 
 ## Test Suite & Reproducible Evidence
 
-This kit ships with a 7-suite, 75+ assertion test harness. Every claim in the
+This kit ships with a 9-suite, 210+ assertion test harness. Every claim in the
 docs is backed by a reproducible test.
 
 ```bash
@@ -300,9 +352,11 @@ bash tests/run_all.sh
 # === 3. Audit HMAC chain ===                passed=13 failed=0
 # === 4. Token budget guard ===              passed=9  failed=0
 # === 5. Drift watcher self-test ===         drift detected in 47ms
-# === 6. Bypass red-team harness ===         passed=32 failed=0   (5 categories, 32/32 blocked)
+# === 6. Bypass red-team harness ===         passed=60 failed=0   (7 categories, 60/60 blocked)
 # === 7. Hook latency micro-bench ===        all hooks p99 ≤ 490ms (macOS dev)
-# RUN-ALL: 7 suites passed, 0 failed
+# === 8. gh CLI guard ===                    passed=77 failed=0
+# === 9. MCP repo guard ===                  passed=43 failed=0
+# RUN-ALL: 9 suites passed, 0 failed
 ```
 
 For Bedrock Guardrails verification (requires AWS account, ~$0.35 spend):
@@ -404,8 +458,10 @@ claude-code-on-aws-bedrock-best-practices/
 │   └── threat-model.md
 ├── hooks/                                 ← all tested ✅
 │   ├── audit-logger.sh                    ← HMAC-chained, fail-closed, CloudWatch dual-write
+│   ├── gh-guard.sh                        ← gh CLI + curl/wget REST write policy
 │   ├── git-guard.sh                       ← enterprise git policy
 │   ├── hook-wrapper.sh                    ← telemetry + fail-closed shim for any hook
+│   ├── mcp-repo-guard.sh                  ← MCP repo-write policy (mcp__.* matcher)
 │   ├── pii-guard.ps1                      ← PII/secrets scanner (Windows)
 │   ├── pii-guard.sh                       ← PII/secrets scanner (Linux/macOS)
 │   └── token-budget-guard.sh              ← agent-loop circuit breaker
