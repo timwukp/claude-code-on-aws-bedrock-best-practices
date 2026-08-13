@@ -1,10 +1,17 @@
 # Test Report — fail-closed-security-hooks
 
-**Last run:** 2026-08-13 · **Result: 108 passed / 0 failed (108 total)** · plugin v1.1.0 (pii-guard v2.0.1, gh-guard v1.0.0, mcp-repo-guard v1.0.0)
+**Last run:** 2026-08-13 · **Result: 108 passed / 0 failed (108 total)** · plugin v1.1.0 (pii-guard v2.0.1, git-guard v1.1.0, gh-guard v1.1.0, mcp-repo-guard v1.0.0)
 
 Run on Amazon Linux 2023 (bash 5.2.15, jq 1.8.1) as well as macOS — see
 [`docs/test-evidence.md`](../../docs/test-evidence.md) §7b for why the Linux run
 is not optional.
+
+The hooks under `plugin/hooks/` that are meant to be byte-identical to their
+`hooks/` originals (`git-guard.sh`, `gh-guard.sh`, `mcp-repo-guard.sh`) are now
+asserted identical by `tests/test_git_guard.sh` and `tests/test_gh_guard.sh` in
+the repository root suite. A copy left a version behind is invisible to the
+suites in this directory, which is how it happened once
+([`docs/test-evidence.md`](../../docs/test-evidence.md) §7c).
 
 Reproducible — regenerate any time:
 
