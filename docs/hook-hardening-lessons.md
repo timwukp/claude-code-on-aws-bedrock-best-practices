@@ -358,6 +358,83 @@ Three practices come out of this:
 
 ---
 
+## 10. A command that spans lines is still one command
+
+Agents write multi-step commands, and they write files with heredocs. Both
+guards in this kit mis-handled a newline, in opposite directions, and the two
+mistakes are the same mistake: **a line is not a command, and a command is not a
+line.**
+
+**A heredoc body is data, not a command list.** `gh-guard.sh` split on newlines
+to find command segments, so every line of a body arrived as its own segment.
+Writing documentation with `cat > policy.md <<'EOF' … EOF` whose prose mentioned
+`gh pr merge` was denied as an attempt to merge a pull request. Nothing was
+being merged. In a docs-heavy repository the guard was densest exactly where it
+was least wanted, which is how a guard ends up switched off (§6).
+
+**Field extraction that runs per line fails open.** `git-guard.sh` matched
+correctly but read its fields with a pipeline:
+
+```bash
+push_args=$(echo "$norm" | sed -E 's/.*git .*push *//')
+remote_name=$(echo "$push_args" | awk '{print $1}')   # ✗ one field PER LINE
+branch_name=$(echo "$push_args" | awk '{print $2}')
+```
+
+`echo` of a multi-line string feeds `awk` several lines, and `awk` prints `$1`
+for each of them. On a two-line command `branch_name` became `"/repo\nmain"`,
+which matches no protected pattern:
+
+```bash
+git push origin main            # blocked
+cd /repo && git push origin main # blocked
+cd /repo
+git push origin main            # allowed — same push, one newline
+```
+
+The destructive checks (`reset --hard`, `clean -f`) survived because they are
+pure regexes with no field extraction. Only the checks that parsed arguments
+were affected, so the suite's coverage of *verbs* said nothing about the
+coverage of *arguments*. Reduce to the matching segment first, then parse.
+
+**The two failures share a root, so fix them together.** Closing the fail-open
+alone re-created the false positive: with per-segment extraction, a heredoc body
+line reading `git push origin main` becomes a segment and gets blocked. A guard
+needs to know where command text ends and data begins *before* any check runs —
+and the exception matters too, because a body a shell consumes (`bash <<EOF`,
+`cat <<EOF | bash`) really is a command list. v1.0.0 caught those by accident,
+via the very bug that produced the false positives, so dropping bodies without
+re-scanning shell-consumed ones would have traded a false positive for a
+regression.
+
+**Resolve heredoc ambiguity toward "not a heredoc".** `<<` is also a left
+shift. Treating `echo $((1<<SHIFT))` as an opener starts a phantom body that
+swallows every following line, including a real `git push` — silent and
+unbounded. Guessing the other way costs one visible false positive. So a
+delimiter must be a whole shell word starting like an identifier:
+
+```bash
+echo $((1<<SHIFT))     # not an opener: ')' is not a word boundary
+echo $((1<<4))         # not an opener: a delimiter cannot start with a digit
+echo "sample: cat <<EOF"  # not an opener: it is inside quotes
+```
+
+**Quote-awareness has to extend to pipe detection.** Deciding whether a body is
+consumed by a shell means looking for `| bash` — but `send.sh "build | bash"
+<<EOF` pipes nothing. Match on text whose quoted spans have been blanked, or on
+tokens (a tokenizer collapses a quoted span into one token, which makes any
+token-based scan quote-aware for free). The first version of this fix scanned
+raw text and recursed into an argument that merely *described* a pipeline.
+
+**§9(a) came back.** The `local s="$1" n=${#s}` bug reappeared in a new helper
+written months after §9 documented it, and it fails open exactly as before: the
+helper aborted, its caller saw an empty string, concluded that nothing ran a
+shell, and skipped the body. Four BLOCK assertions caught it on Linux; on
+macOS bash 3.2 the same code passes. A lesson written down is not a lesson
+enforced — only the suite on the deployment platform is.
+
+---
+
 ## Checklist
 
 - [ ] Every tool that can write to a repo or carry content out has a hook whose
@@ -381,3 +458,10 @@ Three practices come out of this:
       exist nowhere else.
 - [ ] Prefilter patterns are verified against a real payload for each covered
       path (`*gh*` does **not** match `github`).
+- [ ] Heredoc bodies are separated from command text before any check runs, with
+      the exception re-scanned (a body fed to `bash` is a script) — see §10.
+- [ ] No check extracts fields with `echo "$multiline" | awk`; the matching
+      segment is isolated first, and the suite asserts that the same operation
+      written on one line and across two reaches the same verdict.
+- [ ] Every hook that the plugin also ships has a test asserting the two copies
+      are byte-identical; nothing else notices when one is left a version behind.
