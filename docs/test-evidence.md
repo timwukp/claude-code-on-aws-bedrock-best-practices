@@ -13,7 +13,9 @@
 | Audit HMAC chain | 13 assertions (5 emits + 4 tamper modes + fail-closed/open) | **13/13 pass** |
 | Token budget circuit breaker | 9 assertions (token + call budget + isolation) | **9/9 pass** |
 | Drift watcher (real-time) | self-test mutates a file and expects alert | **detected in 59 ms** |
-| Wrapper bypass red team | 32 attempts across 5 categories | **32/32 blocked as expected** |
+| `gh` CLI / REST write policy | 77 assertions (policy, parser bypasses, false positives) | **77/77 pass** |
+| MCP repo write policy | 43 assertions (incl. server-name independence) | **43/43 pass** |
+| Wrapper bypass red team | 60 attempts across 7 categories | **60/60 blocked as expected** |
 | Hook latency at p99 | 200 invocations × 5 hooks | **all ≤ 490 ms (macOS dev)** |
 
 ---
@@ -187,12 +189,14 @@ factor ≈ 10⁷.
 
 ## 6. Wrapper / git / pii / audit bypass attempts
 
-`tests/bypass-attempts.sh` — 32 attempts:
+`tests/bypass-attempts.sh` — 60 attempts:
 
 | Category | Pass / Total | Notes |
 |---|---|---|
 | wrapper | 10 / 10 | Includes the `--permission-mode=bypassPermissions` (equals form) bug **the harness surfaced and we fixed in scripts/wrapper-linux.sh** |
 | git | 14 / 14 | Force, force-with-lease, protected branches, remote allowlist, compound-cmd hide-after-`&&` |
+| gh | 18 / 18 | Same writes without `git`: `gh pr merge`, contents PUT with no branch, refs force-update, protection tampering, alias rename, full-URL endpoint, `curl` straight to the REST API, and two false-positive controls |
+| mcp | 10 / 10 | `push_files`/`create_or_update_file` on the default or a protected branch, `merge_pull_request`, `delete_branch`, `create_repository` as an exfil target, a different `mcp__<server>__` segment, and a non-repo server's `delete_file` left alone |
 | pii | 5 / 5 | Includes 2 documented gaps (space-per-digit, base64) |
 | audit | 2 / 2 | `/dev/null` redirect tolerated when managed env wins; unwritable destination → fail-closed |
 | deploy | 1 / 1 | Real-binary 0700 enforcement (informational) |
@@ -233,6 +237,46 @@ will be well under.
 
 ---
 
+## 7b. Linux verification of the `gh` / MCP guards (EC2)
+
+The two write-path guards were authored on macOS and verified on the platform
+they deploy to: an ephemeral **t3.micro, Amazon Linux 2023.12, bash 5.2.15(1),
+jq-1.8.1, x86_64**, driven over SSM `RunShellScript` (no inbound access, no
+credentials on the instance beyond `AmazonSSMManagedInstanceCore`, terminated
+after the run).
+
+| Suite | Result | Per-call latency |
+|---|---|---|
+| `tests/test_gh_guard.sh` | 77 passed, 0 failed | 39–51 ms |
+| `tests/test_mcp_repo_guard.sh` | 43 passed, 0 failed | ~40 ms |
+| `tests/bypass-attempts.sh` | 60 passed, 0 failed (7 categories at 100%) | — |
+| `plugin/tests/run-tests.sh` | 108 passed, 0 failed | — |
+| `tests/run_all.sh` | 8 of 9 suites pass (see below) | — |
+
+Linux is *faster* than the macOS numbers in §7 — the guards are pure shell plus
+one `jq` per call, so a single invocation costs about a quarter of the p95 hook
+budget.
+
+**Two bugs that exist only on Linux.** Both caused the hook to exit 0 without
+evaluating policy — a fail-*open* — while every ALLOW assertion kept passing:
+
+| Bug | Why macOS missed it | Symptom |
+|---|---|---|
+| `local s="$1" n=${#s}` in the tokenizer | bash 3.2 tolerates it; bash 5.2 under `set -u` aborts the function, because `local` expands all its arguments before assigning any | `s: unbound variable`; 5 of 56 cases passing, all parsing dead |
+| Prefilter `case "$cmd" in *gh*\|*api/v3*)` | Nothing — it was simply wrong everywhere. `github` contains no `gh` substring (g-i-t-h-u-b) | Every `curl https://api.github.com/…` case skipped the guard entirely; only the GitHub Enterprise `/api/v3/` case blocked |
+
+Written up in [`hook-hardening-lessons.md`](hook-hardening-lessons.md) §9. Both
+have regression tests.
+
+**One pre-existing failure, unrelated to these hooks.**
+`tests/test_audit_chain.sh` fails "fail-closed when no log destination (expected
+2 got 0)" on Linux, in `audit-logger.sh`. Confirmed pre-existing by extracting a
+pristine `git archive` of commit `892000b` onto the same instance and running the
+suite there — identical failure with none of the new files present. Tracked
+separately; not fixed here.
+
+---
+
 ## 8. Reproducibility
 
 ```bash
@@ -244,7 +288,7 @@ bash tests/run_all.sh
 
 Expected output ends with:
 ```
-RUN-ALL: 7 suites passed, 0 failed
+RUN-ALL: 9 suites passed, 0 failed
 ```
 
 Total runtime: ~3 minutes on macOS dev box (most spent on the 1000-iteration
@@ -267,6 +311,9 @@ caught each one:
 | 6 | scripts/wrapper-linux.sh | `--permission-mode=bypassPermissions` (equals form) bypassed | Bypass red team |
 | 7 | hooks/audit-logger.sh | `exit 0` on failure → silent audit loss | Audit-chain test fail-closed |
 | 8 | docs/test-results.md | Unverified bypass coverage claim | Bypass red team showed only 90% before fix |
+| 9 | hooks/gh-guard.sh | `local s="$1" n=${#s}` → `set -u` abort on bash 5.2, hook fail-opens | Suite run on Linux (passes on macOS) |
+| 10 | hooks/gh-guard.sh | `*gh*` prefilter never matches `github`, so every `curl` to `api.github.com` skipped the guard | One passing GHE sibling next to 7 failures |
+| 11 | hooks/gh-guard.sh | Re-scanning any token containing `gh` blocked `echo "gh pr merge is blocked"` | False-positive control case |
 
 This is the value of treating the kit as code with tests, not docs with
 checklists.
