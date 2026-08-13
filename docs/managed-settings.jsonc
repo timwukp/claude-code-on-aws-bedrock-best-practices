@@ -144,10 +144,17 @@
   // "strictKnownMarketplaces": true,       // only allow vetted marketplace sources
 
   // --- Hooks (audit + policy enforcement) ---
-  // ALL three hooks are deployed:
-  //   1. git-guard.sh    — enterprise git policy (allowlist, branch protection)
-  //   2. pii-guard.sh    — PII/secrets scanner (UserPromptSubmit + PreToolUse)
-  //   3. audit-logger.sh — append-only audit log (PostToolUse + UserPromptSubmit)
+  // ALL five hooks are deployed:
+  //   1. git-guard.sh      — enterprise git policy (allowlist, branch protection)
+  //   2. gh-guard.sh       — the same writes without git: gh CLI, gh api,
+  //                          curl/wget straight to the REST API
+  //   3. mcp-repo-guard.sh — repo writes from MCP servers. NOTE the separate
+  //                          "mcp__.*" matcher block below: a hook registered
+  //                          under "Bash" is never invoked for an MCP call, so
+  //                          omitting that block leaves the path unguarded
+  //                          (docs/known-issues.md Issue 13).
+  //   4. pii-guard.sh      — PII/secrets scanner (UserPromptSubmit + PreToolUse)
+  //   5. audit-logger.sh   — append-only audit log (PostToolUse + UserPromptSubmit)
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -166,6 +173,25 @@
           {
             "type": "command",
             "command": "/usr/local/etc/claude-code/hooks/git-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/gh-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/pii-guard.sh"
+          }
+        ]
+      },
+      {
+        // MCP tool calls carry no "command" field and never match "Bash".
+        // This entry is what makes the MCP write path enforceable.
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/etc/claude-code/hooks/mcp-repo-guard.sh"
           },
           {
             "type": "command",
