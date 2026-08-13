@@ -3,6 +3,86 @@
 This CHANGELOG documents notable changes to the kit. For full commit history
 see [git log](https://github.com/timwukp/claude-code-on-aws-bedrock-best-practices/commits/main).
 
+## 2026-08-13 — `git-guard.sh` v1.1.0 + `gh-guard.sh` v1.1.0: a newline is not a command boundary
+
+Both Bash guards mis-handled a command that spans lines, in opposite directions.
+Neither bug needed an adversary: agents write multi-step commands and write files
+with heredocs, so both fired on ordinary work.
+
+### Fixed
+
+- **`gh-guard.sh` false positive → `hooks/gh-guard.sh` v1.1.0.** Segment
+  splitting treated every newline as a separator, so each line of a heredoc body
+  arrived as its own command segment: `cat > policy.md <<'EOF' … EOF` whose prose
+  mentioned `gh pr merge` was denied as an attempt to merge a pull request. In a
+  docs-heavy repository the guard was densest where it was least wanted, which is
+  how a guard ends up switched off. Bodies are now separated from command text
+  before any check runs — except a body a shell consumes (`bash <<EOF`,
+  `cat <<EOF | bash`), which is a script and is still scanned.
+- **`git-guard.sh` fail-open → `hooks/git-guard.sh` v1.1.0.** The push checks
+  extracted the remote and branch with `echo "$norm" | awk '{print $1}'`, which
+  reads a field *per line*. On a two-line command the branch name became
+  `"/repo\nmain"` and matched no protected pattern:
+
+  ```bash
+  cd /repo && git push origin main   # blocked
+  cd /repo
+  git push origin main               # allowed, before this release
+  ```
+
+  Extraction is now scoped to the segment that holds the push. The destructive
+  checks (`reset --hard`, `clean -f`) were never affected — they are pure regexes
+  with no field parsing — so verb coverage in the suite said nothing about
+  argument coverage.
+- **`git-guard.sh`, three smaller holes found while writing the suite:**
+  `git push origin refs/heads/main` was not recognised as a push to `main`;
+  `-f` as the final word of a command was not read as a force push; and an `-f`
+  belonging to a *different* command in the same line (`git push origin feat &&
+  rm -f /tmp/x`) was. Also removes a `grep: warning: stray \ before -` that
+  v1.0.0 emitted onto the hook's stderr, where the agent reads block reasons.
+- **Heredoc lookalikes.** `<<` is also a left shift. Mistaking
+  `echo $((1<<SHIFT))` for an opener starts a phantom body that swallows every
+  following line — a silent, unbounded bypass — so a delimiter must be a whole
+  shell word starting like an identifier, and `<<<` is excluded.
+
+### Added
+
+- **[`tests/test_git_guard.sh`](tests/test_git_guard.sh)** — 83 assertions, the
+  first suite this hook has had; registered as step 10 in `tests/run_all.sh`.
+  Both bugs above existed because it did not. Its pairs assert that the same
+  operation written on one line and across two reaches the same verdict.
+- **Plugin copy parity assertions** in both guard suites. `plugin/hooks/` ships
+  its own copies of these hooks; `plugin/hooks/gh-guard.sh` sat a version behind
+  during this work while every suite reported green, because nothing compared
+  them. (`audit-logger.sh`, `hook-wrapper.sh`, `pii-guard.sh` and
+  `token-budget-guard.sh` differ between the trees by design and are excluded.)
+
+### Verification
+
+Ephemeral t3.micro, Amazon Linux 2023.12, bash 5.2.15(1), jq 1.8.1, over SSM.
+Every case was run against an unmodified v1.0.0 `git archive` **and** the patched
+tree on the same host with the same file, so each verdict change is attributable:
+[`docs/test-evidence.md`](docs/test-evidence.md) §7c. Results:
+`test_git_guard.sh` 83/83, `test_gh_guard.sh` 92/92, `test_mcp_repo_guard.sh`
+43/43, `bypass-attempts.sh` 60/60, `plugin/tests/run-tests.sh` 108/108. The
+pre-existing `test_audit_chain.sh` Linux failure in `audit-logger.sh` is
+unchanged and reproduces identically on an unmodified checkout.
+
+The port also reintroduced the `local s="$1" n=${#s}` fail-open documented in
+[`hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) §9(a) — under
+`set -u` on bash 5.2 the helper aborts, its caller reads an empty string and
+concludes that nothing runs a shell. Four BLOCK assertions caught it on Linux;
+macOS bash 3.2 passes the same code. Lesson §10 is new and covers this class.
+
+### Known, still open
+
+`git-guard.sh` does not see `bash -c "git push origin main"`, and does not
+inspect a bare `git push` with no refspec — [`docs/known-issues.md`](docs/known-issues.md)
+Issue 14, with workarounds and the reason both are scoped out. `gh-guard.sh` is
+not affected by the wrapper case.
+
+---
+
 ## 2026-08-13 — Close the two uncovered write paths: `gh-guard.sh` + `mcp-repo-guard.sh`
 
 PR #13 documented that every hook in this kit fired on the `Bash` matcher and

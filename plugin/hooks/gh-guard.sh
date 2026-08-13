@@ -2,7 +2,7 @@
 # =============================================================================
 # GitHub CLI Guard — repo-write policy for the `gh` command surface
 # =============================================================================
-# Hook version: 1.0.0
+# Hook version: 1.1.0
 # Last updated: 2026-08-13
 # Compatible with: claude-code 2.1.150+
 # Dependencies: bash 3.2+, jq (preferred)
@@ -10,6 +10,9 @@
 # Change log:
 #   1.0.0 (2026-08-13) — initial release: quote-aware parser, contents/ref/merge
 #                        /secret/protection endpoint policy, nested -c recursion
+#   1.1.0 (2026-08-13) — heredoc bodies are treated as data, not as command
+#                        segments (they were denied for merely describing a
+#                        blocked verb); a body a shell consumes is still scanned
 # =============================================================================
 # git-guard.sh inspects `git` commands. It does not inspect `gh`, and `gh` is a
 # complete second write path to the same remote: `gh api --method PUT
@@ -144,6 +147,192 @@ normalize_branch() {
   local b="$1"
   b="${b#refs/heads/}"
   printf '%s' "$b"
+}
+
+# --- Heredoc bodies are data, not commands -----------------------------------
+# split_segments() treats a newline as a separator, so every line of a heredoc
+# body arrives as its own command segment. Writing a file with
+# `cat > policy.md <<'EOF' ... EOF` whose prose mentions `gh pr merge` was
+# therefore denied as an attempt to merge a PR — nothing was being merged, and
+# a docs-heavy repo hits this constantly. A denial nobody believes is how a
+# guard ends up switched off, so this is a security bug, not a cosmetic one.
+#
+# Bodies are stripped from the command text and returned separately, because
+# there is one case where a body IS a command list: when a shell consumes it
+# (`bash <<EOF`, `cat <<EOF | bash`). Those get re-scanned; the rest are data.
+#
+# Sets HD_TEXT (command text, bodies removed) and the parallel arrays
+# HD_OPENERS / HD_BODIES (the line that opened each body, and the body).
+#
+# Ambiguity is resolved toward "not a heredoc" on purpose. Mistaking a shift
+# for a heredoc opens a phantom body that swallows every following line —
+# `echo $((1<<SHIFT))` then `gh pr merge 1` would be a silent bypass. Mistaking
+# a heredoc for plain text only risks a false positive, which is visible.
+strip_heredocs() {
+  local s="$1"
+  HD_TEXT="$s"
+  HD_OPENERS=()
+  HD_BODIES=()
+  # Fast path: no heredoc operator anywhere, which is almost every command.
+  [[ "$s" != *'<<'* ]] && return 0
+
+  local n=${#s}
+  local i=0
+  local out=''
+  local q=''
+  local hd_open=''
+  local hd_body=''
+  local line='' rest='' opener='' probe='' delim='' qq=''
+  local nxt=0 j=0 m=0 k=0 d=0 c=''
+  local -a pend_delim=()
+  local -a pend_dash=()
+  local pend_i=0
+
+  while [[ $i -lt $n ]]; do
+    # One line at a time: a 60KB body must not be walked character by
+    # character, and its terminator is line-oriented anyway.
+    rest="${s:i}"
+    if [[ "$rest" == *$'\n'* ]]; then
+      line="${rest%%$'\n'*}"
+      nxt=$((i + ${#line} + 1))
+    else
+      line="$rest"
+      nxt=$n
+    fi
+
+    # --- inside a body: consume up to the terminator line ---
+    if [[ $pend_i -lt ${#pend_delim[@]} ]]; then
+      probe="$line"
+      # <<- allows the terminator to be indented with tabs (not spaces).
+      [[ "${pend_dash[pend_i]}" == 1 ]] && probe="${probe#"${probe%%[!$'\t']*}"}"
+      probe="${probe%$'\r'}"
+      if [[ "$probe" == "${pend_delim[pend_i]}" ]]; then
+        HD_OPENERS[${#HD_OPENERS[@]}]="$hd_open"
+        HD_BODIES[${#HD_BODIES[@]}]="$hd_body"
+        hd_body=''
+        pend_i=$((pend_i+1))
+      else
+        hd_body="$hd_body$line"$'\n'
+      fi
+      i=$nxt
+      continue
+    fi
+
+    # --- a command line: track quotes, pull out heredoc operators ---
+    if [[ ${#pend_delim[@]} -gt 0 ]]; then
+      pend_delim=(); pend_dash=(); pend_i=0
+    fi
+    opener=''
+    j=0
+    m=${#line}
+    while [[ $j -lt $m ]]; do
+      c="${line:j:1}"
+      if [[ -n "$q" ]]; then
+        if [[ "$q" == '"' && "$c" == '\' ]]; then opener="$opener$c${line:j+1:1}"; j=$((j+2)); continue; fi
+        [[ "$c" == "$q" ]] && q=''
+        opener="$opener$c"; j=$((j+1)); continue
+      fi
+      case "$c" in
+        '\') opener="$opener$c${line:j+1:1}"; j=$((j+2)); continue ;;
+        "'"|'"') q="$c"; opener="$opener$c"; j=$((j+1)); continue ;;
+      esac
+      # `<<<` is a herestring — one word, no body.
+      if [[ "${line:j:2}" == '<<' && "${line:j:3}" != '<<<' ]]; then
+        k=$((j+2)); d=0
+        if [[ "${line:k:1}" == '-' ]]; then d=1; k=$((k+1)); fi
+        while [[ "${line:k:1}" == ' ' || "${line:k:1}" == $'\t' ]]; do k=$((k+1)); done
+        delim=''
+        case "${line:k:1}" in
+          "'"|'"')
+            qq="${line:k:1}"; k=$((k+1))
+            while [[ $k -lt $m && "${line:k:1}" != "$qq" ]]; do delim="$delim${line:k:1}"; k=$((k+1)); done
+            if [[ $k -lt $m ]]; then k=$((k+1)); else delim=''; fi ;;
+          *)
+            [[ "${line:k:1}" == '\' ]] && k=$((k+1))
+            while [[ $k -lt $m ]]; do
+              case "${line:k:1}" in
+                [A-Za-z0-9_.-]) delim="$delim${line:k:1}"; k=$((k+1)) ;;
+                *) break ;;
+              esac
+            done
+            # A delimiter is a whole shell word starting like an identifier.
+            # `$((1<<SHIFT))` stops at ')', which is not a word boundary here,
+            # so it stays a shift. `<<4` is not a delimiter either.
+            case "$delim" in [A-Za-z_]*) ;; *) delim='' ;; esac
+            if [[ -n "$delim" && $k -lt $m ]]; then
+              case "${line:k:1}" in
+                ' '|$'\t'|';'|'&'|'|'|'>'|'<') ;;
+                *) delim='' ;;
+              esac
+            fi ;;
+        esac
+        if [[ -n "$delim" ]]; then
+          pend_delim[${#pend_delim[@]}]="$delim"
+          pend_dash[${#pend_dash[@]}]="$d"
+          opener="$opener "
+          j=$k
+          continue
+        fi
+      fi
+      opener="$opener$c"; j=$((j+1))
+    done
+    out="$out$opener"$'\n'
+    hd_open="$opener"
+    hd_body=''
+    i=$nxt
+  done
+
+  # An unterminated heredoc: bash reads the rest of the input as the body.
+  if [[ $pend_i -lt ${#pend_delim[@]} && -n "$hd_body" ]]; then
+    HD_OPENERS[${#HD_OPENERS[@]}]="$hd_open"
+    HD_BODIES[${#HD_BODIES[@]}]="$hd_body"
+  fi
+
+  HD_TEXT="$out"
+  return 0
+}
+
+# Does the line that opened a heredoc hand the body to something that runs it?
+# `cat <<EOF > notes.md` writes data; `bash <<EOF` and `cat <<EOF | bash` run it.
+opener_runs_shell() {
+  local seg="$1"
+  tokenize "$seg"
+  local -a toks=(${TOKENS[@]+"${TOKENS[@]}"})
+  local cword
+  cword=$(command_word ${toks[@]+"${toks[@]}"}) || cword=''
+  case "$cword" in
+    bash|sh|zsh|dash|ksh|eval|xargs|timeout|script|setsid|flock|nice|stdbuf) return 0 ;;
+  esac
+  # A pipe into a shell makes the producer's output a script. The scan runs over
+  # TOKENS, not the raw text, because tokenize() collapses a quoted span into a
+  # single token: a `| bash` sitting inside a quoted argument is data being
+  # handed to some other program, and treating it as a real pipe would recurse
+  # into that argument and parse its contents as commands.
+  local t w expect=0
+  for t in ${toks[@]+"${toks[@]}"}; do
+    if [[ $expect -eq 1 ]]; then
+      case "$t" in
+        sudo|env|command|exec|nohup|[A-Za-z_]*=*) continue ;;
+      esac
+      case "${t##*/}" in
+        bash|sh|zsh|dash|ksh) return 0 ;;
+      esac
+      expect=0
+    fi
+    case "$t" in
+      *'|'*)
+        # `cat <<EOF|bash` tokenizes as one word; `| bash` as two.
+        w="${t##*|}"
+        if [[ -z "$w" ]]; then
+          expect=1
+        else
+          case "${w##*/}" in
+            bash|sh|zsh|dash|ksh) return 0 ;;
+          esac
+        fi ;;
+    esac
+  done
+  return 1
 }
 
 # --- Quote-aware, escape-aware segment split ---------------------------------
@@ -573,7 +762,20 @@ gh_arg_start() {
 scan_command() {
   local cmd="$1" depth="$2"
   [[ $depth -gt 3 ]] && return 0
-  split_segments "$cmd"
+  # Pull heredoc bodies out before splitting on newlines, and copy the results
+  # into locals immediately — the recursive calls below overwrite the globals.
+  strip_heredocs "$cmd"
+  local text="$HD_TEXT"
+  local -a hopeners=(${HD_OPENERS[@]+"${HD_OPENERS[@]}"})
+  local -a hbodies=(${HD_BODIES[@]+"${HD_BODIES[@]}"})
+  local hi=0
+  while [[ $hi -lt ${#hbodies[@]} ]]; do
+    if opener_runs_shell "${hopeners[hi]}"; then
+      scan_command "${hbodies[hi]}" $((depth+1))
+    fi
+    hi=$((hi+1))
+  done
+  split_segments "$text"
   local -a segs=(${SEGMENTS[@]+"${SEGMENTS[@]}"})
   local seg idx
   for seg in ${segs[@]+"${segs[@]}"}; do

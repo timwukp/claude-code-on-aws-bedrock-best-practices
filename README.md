@@ -497,11 +497,14 @@ claude-code-on-aws-bedrock-best-practices/
     │   ├── negative/
     │   └── positive/
     ├── bench_hook_latency.sh              ← 200-iter latency micro-bench
-    ├── bypass-attempts.sh                 ← 32-attempt red-team harness
-    ├── run_all.sh                         ← master runner (7 suites)
+    ├── bypass-attempts.sh                 ← 60-attempt red-team harness
+    ├── run_all.sh                         ← master runner (10 suites)
     ├── run_pii_corpus.sh                  ← 108-case PII verification
     ├── test_audit_chain.sh                ← HMAC chain tamper detection
+    ├── test_gh_guard.sh                   ← gh CLI / gh api / raw REST policy
+    ├── test_git_guard.sh                  ← git policy, multi-line + heredoc parsing
     ├── test_hook_wrapper.sh               ← telemetry + fail-closed semantics
+    ├── test_mcp_repo_guard.sh             ← mcp__.* write policy
     └── test_token_budget.sh               ← per-session circuit breaker
 ```
 
