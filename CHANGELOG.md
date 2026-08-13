@@ -3,6 +3,93 @@
 This CHANGELOG documents notable changes to the kit. For full commit history
 see [git log](https://github.com/timwukp/claude-code-on-aws-bedrock-best-practices/commits/main).
 
+## 2026-08-14 — `git-guard.sh` v1.2.0 + `gh-guard.sh` v1.2.0: policy on tokens, one shared parser, and two hooks that were never running
+
+Two findings, one of them embarrassing. `git-guard.sh` decided policy by matching
+the command *text*, which cannot tell a command from a quotation — so
+`bash -c "git push origin main"` was allowed while
+`git commit -m "revert the git push origin main change"` was denied. And two of
+the five hooks were committed without the execute bit, so invoking them by path
+returned `126` and the tool call proceeded unguarded.
+
+### Fixed
+
+- **`git-guard.sh` fail-open and false positive, one cause →
+  `hooks/git-guard.sh` v1.2.0** ([`known-issues.md`](docs/known-issues.md) Issue
+  14). Every segment is now tokenized and policy runs on tokens. A quoted span is
+  one token, which makes the guard quote-aware in both directions at once:
+
+  ```bash
+  bash -c "git push origin main"      # was allowed → now blocked
+  timeout 5 git push origin main      # was allowed → now blocked
+  sudo git push origin main           # was allowed → now blocked
+  git push                            # was allowed → now blocked when HEAD is main
+  git push --all origin               # was allowed → now blocked
+  git push origin feature/x main      # was allowed → now blocked (second refspec)
+  git push origin +feature:other      # was allowed → now blocked (+ is a force)
+  git push -uf origin feature         # was allowed → now blocked (bundled -f)
+  git checkout -f main                # was allowed → now blocked (short form)
+
+  git commit -m "revert the git push origin main change"   # was blocked → now allowed
+  ```
+
+  Recursion into a quoted argument happens **only** when the command word is an
+  interpreter or wrapper (`bash -c`, `sh -c`, `eval`, `xargs`, `timeout`, …), with
+  a depth cap of 3 — recursing on content instead would turn
+  `echo "git push origin main"` into a denial. A push whose target is not on the
+  command line resolves it (`git -C <dir> rev-parse --abbrev-ref HEAD`) rather
+  than skipping the check, which had made the shortest spelling of the dangerous
+  command the one that passed. Residual limit, documented in Issue 14: a wrapper
+  option taking a non-flag value stops the walk, so `sudo -u bob git push` is not
+  recognised.
+- **`gh-guard.sh` v1.2.0** gains the same wrapper handling: `timeout 5 gh pr
+  merge 1` is now inspected. This is the only behaviour change in that hook; all
+  92 of its existing assertions pass unmodified.
+- **Two hooks shipped non-executable**
+  ([`known-issues.md`](docs/known-issues.md) Issue 15). `hooks/gh-guard.sh` and
+  `hooks/mcp-repo-guard.sh` (and both `plugin/hooks/` copies) were mode `100644`.
+  A hook is invoked by path, so the exec failed with `126` — neither `0` nor `2` —
+  and the write proceeded. It survived three releases because every unit suite
+  runs `chmod +x` on its own hook before the first assertion, measuring a file
+  whose mode it had just repaired; `tests/bypass-attempts.sh` does not, and 28 of
+  its 60 rows were failing with `126` on a clean checkout. Cause: these files were
+  added through the GitHub contents API, which has no mode parameter and creates
+  blobs as `100644`. **If you installed these hooks, run `chmod +x
+  ~/.claude/hooks/*.sh` and verify one payload returns `2`.**
+
+### Added
+
+- **`hooks/lib/shell-parse.sh`** — the canonical shell-command parsing front end
+  (heredoc separation, quote-aware segment split, tokenizer, command-word
+  resolution, wrapper walking). Both guards had been carrying hand-maintained
+  copies of it, and the copies had already diverged in a way that fails open.
+- **`scripts/sync-parser.sh`** — copies that region into each hook between
+  sentinel lines and refreshes the plugin copies; `--check` exits 1 on drift. The
+  parser is copied rather than sourced on purpose: a hook must stay a single file,
+  and a failed runtime `source` has no safe branch (continue → the guard enforces
+  nothing; exit 2 → every Bash command is blocked until the hook is removed). The
+  reasoning is written into the lib header.
+- **`tests/test_shared_parser.sh`** (68 assertions, step 11 of `run_all.sh`) —
+  asserts no copy has drifted, that the drift detector *can* fail (it tampers with
+  a throwaway tree and requires the failure), that neither hook sources the lib at
+  runtime, and that every shipped hook is executable. It found a stale
+  `plugin/hooks/gh-guard.sh` on its first run.
+- **55 new assertions in `tests/test_git_guard.sh`** (83 → 138), including two
+  real fixture repositories with HEAD on `main` and on `feature/x` for the
+  implicit-target cases, and a 70 KB command for the oversized fallback.
+
+### Verified
+
+One ephemeral t3.micro (Amazon Linux 2023, bash 5.2.15, jq 1.8.1, git 2.50.1),
+SSM only, torn down afterwards. A pristine `git archive` of the previous commit
+was extracted beside the candidate on the same host, and `tests/run_all.sh` plus a
+40-row verdict matrix were run against both: baseline 8 of 10 suites with 29
+failing assertions, candidate 10 of 11 suites with 1 — the pre-existing
+`audit-logger.sh` failure recorded in
+[`test-evidence.md`](docs/test-evidence.md) §7b. Full matrix and latency numbers
+in §7d; the reusable lessons are §11 and §12 of
+[`hook-hardening-lessons.md`](docs/hook-hardening-lessons.md).
+
 ## 2026-08-13 — `git-guard.sh` v1.1.0 + `gh-guard.sh` v1.1.0: a newline is not a command boundary
 
 Both Bash guards mis-handled a command that spans lines, in opposite directions.

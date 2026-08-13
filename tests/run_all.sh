@@ -39,6 +39,11 @@ bash tests/test_mcp_repo_guard.sh; track $?
 step "10. git guard"
 bash tests/test_git_guard.sh; track $?
 
+# Runs last on purpose: it is the suite that tells you the other two were
+# testing the file you think they were.
+step "11. Shared parser (no drift between the hooks and their canonical source)"
+bash tests/test_shared_parser.sh; track $?
+
 echo
 echo "=================================="
 echo "RUN-ALL: $OK suites passed, $FAIL failed"

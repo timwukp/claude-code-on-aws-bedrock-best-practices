@@ -2,7 +2,7 @@
 # =============================================================================
 # GitHub CLI Guard — repo-write policy for the `gh` command surface
 # =============================================================================
-# Hook version: 1.1.0
+# Hook version: 1.2.0
 # Last updated: 2026-08-13
 # Compatible with: claude-code 2.1.150+
 # Dependencies: bash 3.2+, jq (preferred)
@@ -13,6 +13,13 @@
 #   1.1.0 (2026-08-13) — heredoc bodies are treated as data, not as command
 #                        segments (they were denied for merely describing a
 #                        blocked verb); a body a shell consumes is still scanned
+#   1.2.0 (2026-08-13) — the parsing front end is now generated from
+#                        hooks/lib/shell-parse.sh, shared with git-guard.sh
+#                        (this file and that one carried the same 150-line
+#                        heredoc parser by hand). One behaviour change comes with
+#                        it: a wrapper that carries its own arguments no longer
+#                        hides the command, so `timeout 5 gh pr merge 1` is
+#                        inspected instead of allowed.
 # =============================================================================
 # git-guard.sh inspects `git` commands. It does not inspect `gh`, and `gh` is a
 # complete second write path to the same remote: `gh api --method PUT
@@ -49,6 +56,10 @@
 #     branch check for a write that actually targets the default branch.
 #   * Multi-word tokens containing `gh` are re-scanned, so `bash -c 'gh pr
 #     merge 1'` is inspected rather than treated as one opaque argument.
+#   * The region marked SHARED PARSER below is generated from
+#     hooks/lib/shell-parse.sh by scripts/sync-parser.sh and is byte-identical in
+#     git-guard.sh. Edit it there, not here; tests/test_shared_parser.sh fails if
+#     a copy drifts.
 #
 # Configuration via environment variables (settings.json env block):
 #   GH_GUARD_PROTECTED_BRANCHES        — comma list, globs allowed
@@ -118,14 +129,15 @@ deny() {
   exit 2
 }
 
-# --- Helper: glob match against a comma-separated list ------------------------
+# >>> SHARED PARSER — generated from hooks/lib/shell-parse.sh; edit there >>>
+
+# --- Glob match against a comma-separated list -------------------------------
 list_match() {
   local needle="$1" list="$2" pattern
   local oldifs="$IFS"
   IFS=','
   for pattern in $list; do
     IFS="$oldifs"
-    # trim
     pattern="${pattern#"${pattern%%[![:space:]]*}"}"
     pattern="${pattern%"${pattern##*[![:space:]]}"}"
     [[ -z "$pattern" ]] && { IFS=','; continue; }
@@ -137,11 +149,6 @@ list_match() {
   return 1
 }
 
-branch_protected() {
-  [[ "$CI_MODE" == "true" ]] && return 1
-  list_match "$1" "$PROTECTED_BRANCHES"
-}
-
 # refs/heads/main and main are the same branch; compare the short name.
 normalize_branch() {
   local b="$1"
@@ -150,12 +157,11 @@ normalize_branch() {
 }
 
 # --- Heredoc bodies are data, not commands -----------------------------------
-# split_segments() treats a newline as a separator, so every line of a heredoc
-# body arrives as its own command segment. Writing a file with
-# `cat > policy.md <<'EOF' ... EOF` whose prose mentions `gh pr merge` was
-# therefore denied as an attempt to merge a PR — nothing was being merged, and
-# a docs-heavy repo hits this constantly. A denial nobody believes is how a
-# guard ends up switched off, so this is a security bug, not a cosmetic one.
+# Segments are split on newlines, so without this every line of a heredoc body
+# arrives as its own command segment: writing a file with
+# `cat > policy.md <<'EOF' ... EOF` whose prose quotes a blocked command was
+# denied as an attempt to run it. A denial nobody believes is how a guard ends
+# up switched off, so this is a security bug, not a cosmetic one.
 #
 # Bodies are stripped from the command text and returned separately, because
 # there is one case where a body IS a command list: when a shell consumes it
@@ -164,10 +170,11 @@ normalize_branch() {
 # Sets HD_TEXT (command text, bodies removed) and the parallel arrays
 # HD_OPENERS / HD_BODIES (the line that opened each body, and the body).
 #
-# Ambiguity is resolved toward "not a heredoc" on purpose. Mistaking a shift
-# for a heredoc opens a phantom body that swallows every following line —
-# `echo $((1<<SHIFT))` then `gh pr merge 1` would be a silent bypass. Mistaking
-# a heredoc for plain text only risks a false positive, which is visible.
+# Ambiguity is resolved toward "not a heredoc" on purpose. Mistaking a shift for
+# a heredoc opens a phantom body that swallows every following line —
+# `echo $((1<<SHIFT))` then a blocked command on the next line would be a silent
+# bypass. Mistaking a heredoc for plain text only risks a false positive, which
+# is visible.
 strip_heredocs() {
   local s="$1"
   HD_TEXT="$s"
@@ -292,49 +299,6 @@ strip_heredocs() {
   return 0
 }
 
-# Does the line that opened a heredoc hand the body to something that runs it?
-# `cat <<EOF > notes.md` writes data; `bash <<EOF` and `cat <<EOF | bash` run it.
-opener_runs_shell() {
-  local seg="$1"
-  tokenize "$seg"
-  local -a toks=(${TOKENS[@]+"${TOKENS[@]}"})
-  local cword
-  cword=$(command_word ${toks[@]+"${toks[@]}"}) || cword=''
-  case "$cword" in
-    bash|sh|zsh|dash|ksh|eval|xargs|timeout|script|setsid|flock|nice|stdbuf) return 0 ;;
-  esac
-  # A pipe into a shell makes the producer's output a script. The scan runs over
-  # TOKENS, not the raw text, because tokenize() collapses a quoted span into a
-  # single token: a `| bash` sitting inside a quoted argument is data being
-  # handed to some other program, and treating it as a real pipe would recurse
-  # into that argument and parse its contents as commands.
-  local t w expect=0
-  for t in ${toks[@]+"${toks[@]}"}; do
-    if [[ $expect -eq 1 ]]; then
-      case "$t" in
-        sudo|env|command|exec|nohup|[A-Za-z_]*=*) continue ;;
-      esac
-      case "${t##*/}" in
-        bash|sh|zsh|dash|ksh) return 0 ;;
-      esac
-      expect=0
-    fi
-    case "$t" in
-      *'|'*)
-        # `cat <<EOF|bash` tokenizes as one word; `| bash` as two.
-        w="${t##*|}"
-        if [[ -z "$w" ]]; then
-          expect=1
-        else
-          case "${w##*/}" in
-            bash|sh|zsh|dash|ksh) return 0 ;;
-          esac
-        fi ;;
-    esac
-  done
-  return 1
-}
-
 # --- Quote-aware, escape-aware segment split ---------------------------------
 # Separators: ; & | newline and the subshell/backtick boundaries ( ) `
 # so that `$(gh pr merge 1)` yields a segment of its own.
@@ -374,6 +338,9 @@ split_segments() {
 }
 
 # --- Tokenize one segment into real argument values (quotes removed) ---------
+# A quoted span collapses into ONE token, which is what makes every token scan
+# quote-aware for free: `echo "git push origin main"` has two tokens, and the
+# second is not the word `git`.
 tokenize() {
   local s="$1"
   local n=${#s} i=0 c q='' cur='' has=0
@@ -396,6 +363,137 @@ tokenize() {
   done
   if [[ $has -eq 1 || -n "$cur" ]]; then TOKENS[${#TOKENS[@]}]="$cur"; fi
   return 0
+}
+
+# --- The command word of a token list ----------------------------------------
+# Leading VAR=value assignments and transparent prefixes (env, sudo, ...) are
+# skipped, and the result is a basename so /bin/bash and bash compare equal.
+command_word() {
+  local t
+  for t in "$@"; do
+    case "$t" in
+      [A-Za-z_]*=*) continue ;;
+      env|command|builtin|exec|sudo|doas|nohup|time|then|do|else|!) continue ;;
+      *) printf '%s' "${t##*/}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# --- Where a named program's arguments start in a token list -----------------
+# Echoes the 1-based index of the token *after* $1, or fails if the token list is
+# not an invocation of it. Handles VAR=val prefixes, transparent prefixes
+# (`sudo gh ...`) and wrappers that carry arguments of their own
+# (`timeout 5 git push`, `xargs -0 git push`), which a plain "first word" test
+# misses — and missing them is a fail-open, not a false positive.
+#
+# Residual limit: a wrapper option that takes a *non-flag* value stops the walk,
+# so `sudo -u bob git push` is not recognised. Skipping arbitrary words instead
+# would let `xargs -I{} echo git push` read as a push, and a false positive on
+# `echo` costs more than this case is worth. See docs/known-issues.md.
+cmd_arg_start() {
+  local want="$1"; shift
+  local i=0 t wrapped=0
+  for t in "$@"; do
+    i=$((i+1))
+    case "$t" in
+      [A-Za-z_]*=*) continue ;;
+    esac
+    case "${t##*/}" in
+      "$want") printf '%s' "$i"; return 0 ;;
+      env|command|builtin|exec|sudo|doas|nohup|time|then|do|else|!) continue ;;
+      timeout|xargs|nice|stdbuf|flock|setsid|watch|parallel|script)
+        wrapped=1; continue ;;
+    esac
+    if [[ $wrapped -eq 1 ]]; then
+      case "$t" in
+        -*|[0-9]*) continue ;;
+      esac
+    fi
+    return 1
+  done
+  return 1
+}
+
+# --- Quoted arguments that a wrapper will hand to a shell --------------------
+# Sets NESTED to the multi-word arguments of an interpreter or exec wrapper, so
+# `bash -c "git push origin main"` can be re-scanned as a command. Empty for
+# anything else: recursing into every quoted string would turn
+# `echo "git push origin main"` into a denial, and a guard that blocks talking
+# about a command is a guard that gets switched off.
+nested_candidates() {
+  NESTED=()
+  local cword
+  cword=$(command_word "$@") || return 0
+  case "$cword" in
+    bash|sh|zsh|dash|ksh|eval|xargs|timeout|ssh|script|setsid|flock|nice|stdbuf|watch|parallel) ;;
+    *) return 0 ;;
+  esac
+  local t
+  for t in "$@"; do
+    case "$t" in
+      *[[:space:]]*) NESTED[${#NESTED[@]}]="$t" ;;
+    esac
+  done
+  return 0
+}
+
+# --- Does the line that opened a heredoc hand the body to something that runs it?
+# `cat <<EOF > notes.md` writes data; `bash <<EOF` and `cat <<EOF | bash` run it.
+# Skipping this would be a regression: before heredoc bodies were separated from
+# command text, body lines were inspected as commands, so `bash <<EOF ... EOF`
+# was caught by accident.
+opener_runs_shell() {
+  local seg="$1"
+  tokenize "$seg"
+  local -a toks=(${TOKENS[@]+"${TOKENS[@]}"})
+  local cword
+  cword=$(command_word ${toks[@]+"${toks[@]}"}) || cword=''
+  # The list errs toward "this runs a shell": guessing wrong in that direction
+  # costs a visible false positive, guessing wrong the other way lets a script
+  # through unread.
+  case "$cword" in
+    bash|sh|zsh|dash|ksh|eval|xargs|timeout|script|setsid|flock|nice|stdbuf) return 0 ;;
+  esac
+  # A pipe into a shell makes the producer's output a script. The scan runs over
+  # TOKENS, not the raw text, because tokenize() collapses a quoted span into a
+  # single token: a `| bash` sitting inside a quoted argument is data being
+  # handed to some other program, and treating it as a real pipe would recurse
+  # into that argument and parse its contents as commands.
+  local t w expect=0
+  for t in ${toks[@]+"${toks[@]}"}; do
+    if [[ $expect -eq 1 ]]; then
+      case "$t" in
+        sudo|env|command|exec|nohup|[A-Za-z_]*=*) continue ;;
+      esac
+      case "${t##*/}" in
+        bash|sh|zsh|dash|ksh) return 0 ;;
+      esac
+      expect=0
+    fi
+    case "$t" in
+      *'|'*)
+        # `cat <<EOF|bash` tokenizes as one word; `| bash` as two.
+        w="${t##*|}"
+        if [[ -z "$w" ]]; then
+          expect=1
+        else
+          case "${w##*/}" in
+            bash|sh|zsh|dash|ksh) return 0 ;;
+          esac
+        fi ;;
+    esac
+  done
+  return 1
+}
+
+# <<< SHARED PARSER — end of generated region <<<
+
+# CI_MODE lives here rather than at each call site so that every path which
+# resolves a branch relaxes together.
+branch_protected() {
+  [[ "$CI_MODE" == "true" ]] && return 1
+  list_match "$1" "$PROTECTED_BRANCHES"
 }
 
 # --- Field access on a token array passed as "$@" ----------------------------
@@ -724,38 +822,6 @@ check_gh() {
   esac
 }
 
-# The command word of a segment: leading VAR=value assignments and transparent
-# prefixes (env, sudo, ...) are skipped, and the result is a basename so
-# /bin/bash and bash compare equal.
-command_word() {
-  local t
-  for t in "$@"; do
-    case "$t" in
-      [A-Za-z_]*=*) continue ;;
-      env|command|builtin|exec|sudo|nohup|time|then|do|else|!) continue ;;
-      *) printf '%s' "${t##*/}"; return 0 ;;
-    esac
-  done
-  return 1
-}
-
-# Is this token list a `gh` invocation? Echoes the index of the token after gh.
-gh_arg_start() {
-  local i=0 t
-  for t in "$@"; do
-    i=$((i+1))
-    case "$t" in
-      *=*) case "$t" in [A-Za-z_]*=*) continue ;; esac ;;
-    esac
-    case "$t" in
-      env|command|builtin|exec|sudo|nohup|time|then|do|else|!|xargs) continue ;;
-      gh|*/gh) printf '%s' "$i"; return 0 ;;
-      *) return 1 ;;
-    esac
-  done
-  return 1
-}
-
 # =============================================================================
 # Walk the command: segments → tokens → policy, recursing into quoted commands
 # =============================================================================
@@ -785,27 +851,22 @@ scan_command() {
     # A quoted multi-word argument is only re-scanned when the command word is
     # an interpreter or exec wrapper — `bash -c 'gh pr merge 1'` must be
     # inspected, while `echo "gh pr merge is blocked"` must not be blocked for
-    # quoting the policy it is describing.
-    local -a nested=()
+    # quoting the policy it is describing. Collect the candidates before running
+    # policy: check_gh() and check_http() do their own parsing.
+    nested_candidates ${toks[@]+"${toks[@]}"}
+    local -a nested=(${NESTED[@]+"${NESTED[@]}"})
     local t cword
     cword=$(command_word ${toks[@]+"${toks[@]}"}) || cword=''
-    case "$cword" in
-      bash|sh|zsh|dash|ksh|eval|xargs|timeout|ssh|script|setsid|flock|nice|stdbuf|watch|parallel)
-        for t in ${toks[@]+"${toks[@]}"}; do
-          case "$t" in
-            *[[:space:]]*) case "$t" in *gh*|*github*|*api/v3*) nested[${#nested[@]}]="$t" ;; esac ;;
-          esac
-        done ;;
-    esac
-    if idx=$(gh_arg_start ${toks[@]+"${toks[@]}"}); then
-      local -a rest=("${toks[@]:idx}")
+    if idx=$(cmd_arg_start gh ${toks[@]+"${toks[@]}"}); then
+      local -a rest=()
+      [[ $idx -lt ${#toks[@]} ]] && rest=("${toks[@]:idx}")
       check_gh ${rest[@]+"${rest[@]}"}
     fi
     case "$cword" in
       curl|wget) check_http ${toks[@]+"${toks[@]}"} ;;
     esac
     for t in ${nested[@]+"${nested[@]}"}; do
-      scan_command "$t" $((depth+1))
+      case "$t" in *gh*|*github*|*api/v3*) scan_command "$t" $((depth+1)) ;; esac
     done
   done
   return 0
