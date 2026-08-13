@@ -146,6 +146,49 @@ allowed 'grep -rn "gh api" docs/' "searching docs for gh api"
 allowed 'gh api -X POST repos/o/r/issues -f title=t -f body=b' "opening an issue"
 allowed 'gh api -X POST repos/o/r/pulls/7/reviews -f body=b -f event=COMMENT' "leaving a review"
 
+# A heredoc body is data. split_segments() splits on newlines, so before v1.1.0
+# every line of one arrived as its own command segment and writing docs about
+# the policy was denied as an attempt to execute it. This repo is mostly docs,
+# so the guard was densest exactly where it was least wanted.
+echo "== allowed: heredoc bodies are data, not commands =="
+allowed "$(printf 'cat > /tmp/policy.md <<%sEOF%s\nMerging is a human step: gh pr merge is blocked.\nEOF' "'" "'")" \
+  "heredoc prose naming a blocked verb"
+allowed "$(printf 'cat > /tmp/p.md <<EOF\nrun gh api -X PUT repos/o/r/contents/f.md to write a file\nEOF')" \
+  "heredoc prose with an unquoted delimiter"
+allowed "$(printf 'cat <<-END > /tmp/p.md\n\tgh repo delete o/r is denied\n\tEND')" \
+  "heredoc prose with <<- and a tab-indented terminator"
+allowed "$(printf 'cat <<%sA%s > /tmp/a; cat <<%sB%s > /tmp/b\ngh pr merge 1\nA\ngh secret set X\nB' "'" "'" "'" "'")" \
+  "two heredocs of prose in one command"
+allowed "$(printf 'gh pr create --title t --base main --head feat --body-file - <<%sEOF%s\nThis PR stops gh pr merge from working.\nEOF' "'" "'")" \
+  "opening a PR whose body describes the blocked verb"
+allowed 'wc -c <<< "gh pr merge 1"' "a herestring is not a heredoc"
+# Only an UNQUOTED pipe into a shell makes a body a script. A `| bash` inside a
+# quoted argument is data being handed to some other program, and treating it as
+# a real pipe would scan the body as commands.
+allowed "$(printf 'send.sh "pipeline: build | bash" <<EOF\ngh pr merge 1\nEOF')" \
+  "a quoted \"| bash\" in the opener is not a pipe into a shell"
+allowed "$(printf 'logger.sh --tag deploy <<EOF\ngh pr merge 1\nEOF')" \
+  "an arbitrary program consuming a heredoc does not execute it"
+
+# Mistaking something for a heredoc is worse than missing one: the phantom body
+# swallows every following line, so a blocked verb after it is never seen.
+echo "== blocked: heredoc lookalikes must not swallow the next command =="
+blocked "$(printf 'echo $((1<<SHIFT))\ngh pr merge 1')" \
+  "a left shift is not a heredoc opener (phantom body would hide the merge)"
+blocked "$(printf 'echo "sample: cat <<EOF"\ngh pr merge 1')" \
+  "<<EOF inside a quoted argument is not a heredoc opener"
+blocked "$(printf 'echo $((1<<4))\ngh repo delete o/r --yes')" \
+  "a numeric shift is not a heredoc opener"
+
+# The exception: a body a shell consumes is a script, so it must still be read.
+echo "== blocked: a heredoc fed to a shell is still a command list =="
+blocked "$(printf 'bash <<%sEOF%s\ncd /repo\ngh pr merge 1 --squash\nEOF' "'" "'")" \
+  "heredoc script piped into bash via redirection"
+blocked "$(printf 'cat <<%sEOF%s | bash\ngh pr merge 1\nEOF' "'" "'")" \
+  "heredoc piped into bash"
+blocked "$(printf 'sh <<EOF\ngh api -X DELETE repos/o/r/git/refs/heads/main\nEOF')" \
+  "heredoc script fed to sh"
+
 echo "== configuration =="
 GH_GUARD_PROTECTED_BRANCHES="develop,trunk" \
   blocked 'gh api -X PUT repos/o/r/contents/f -f branch=develop -f content=YWJj' \
@@ -194,6 +237,22 @@ if [[ "$dur" -lt 1000 ]]; then
 else
   TEST_FAIL=$((TEST_FAIL + 1)); printf '  ✗ %s (%sms)\n' "single call too slow" "$dur"
   TEST_FAIL_DETAILS="${TEST_FAIL_DETAILS}\n  - latency ${dur}ms"
+fi
+
+echo "== plugin copy parity =="
+# The plugin ships its own copy of this hook. They are meant to be byte
+# identical, and nothing was checking that: while this change was being made the
+# copy stayed a version behind, so plugin users would have run the unfixed
+# parser while this suite reported green.
+PLUGIN_COPY="$ROOT/plugin/hooks/gh-guard.sh"
+if [[ ! -f "$PLUGIN_COPY" ]]; then
+  TEST_FAIL=$((TEST_FAIL + 1)); printf '  ✗ %s\n' "plugin/hooks/gh-guard.sh is missing"
+  TEST_FAIL_DETAILS="${TEST_FAIL_DETAILS}\n  - plugin copy missing"
+elif cmp -s "$HOOK" "$PLUGIN_COPY"; then
+  TEST_PASS=$((TEST_PASS + 1)); printf '  ✓ %s\n' "plugin/hooks copy is identical to hooks/"
+else
+  TEST_FAIL=$((TEST_FAIL + 1)); printf '  ✗ %s\n' "plugin/hooks copy has drifted from hooks/"
+  TEST_FAIL_DETAILS="${TEST_FAIL_DETAILS}\n  - plugin/hooks/gh-guard.sh differs from hooks/gh-guard.sh"
 fi
 
 summary
