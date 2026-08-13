@@ -133,4 +133,5 @@ This pattern is sketched in `terraform/k8s-baseline/` (left as a follow-up).
 | macOS, sudoer user          | chflags uchg        | MDM non-sudoer + schg + drift watcher | ☑ design |
 | macOS, non-sudoer           | chflags schg        | (matches default Linux behaviour)     | ✅ |
 | Windows native              | UserPromptSubmit gap| Bedrock Guardrails (mandatory)        | ☑ design |
+| Windows native              | no `gh`/MCP write guard (both hooks are bash) | Branch protection + required reviews server-side on the remote; deny `Bash(gh:*)` if WSL is present | ☑ design |
 | Kubernetes pod              | n/a (ephemeral)     | ConfigMap RO + DynamoDB chain state   | ☑ design |
