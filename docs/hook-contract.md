@@ -23,12 +23,34 @@ A single JSON object on **stdin**. Common fields:
 
 The hook MUST be tolerant of missing optional fields (use `// empty` in jq).
 
+Keep the payload on **stdin end-to-end**. Never round-trip it through the
+environment (`export PAYLOAD`) or argv: both are bounded by ARG_MAX (~1 MB),
+so a single oversized tool call makes every downstream `exec` fail with
+`Argument list too long` and the hook stops enforcing — silently, and only for
+the largest (most interesting) payloads. Pass it to inner interpreters with a
+builtin: `printf '%s' "$payload" | python3 inner.py`. Test with a ≥1.2 MB
+payload.
+
+MCP tool events have **no `tool_input.command`** — `tool_name` is
+`mcp__<server>__<tool>` and `tool_input` carries structured fields. A
+`"matcher": "Bash"` hook never fires for them; write-capable MCP servers need
+their own `"matcher": "mcp__.*"` entry (see
+[`known-issues.md`](known-issues.md) Issue 13).
+
 ## Output
 
 - **stdout** is ignored by the harness for all events except `UserPromptSubmit`,
   where any stdout is echoed back to the user (used for advisory messages).
 - **stderr** is shown to the user if the hook blocks (exit 2). Keep it short
   and actionable.
+- On exit 2, stdout is **discarded** — a block reason printed to stdout
+  surfaces as "blocked, no reason given" and the agent retries blind variants.
+  Verified in production: this exact bug made every block message invisible.
+- Write the stderr text **for the agent**, which reads it and acts on it:
+  state the sanctioned alternative ("use a feature branch + PR via …"), not
+  just the denial. A good block message converts a hard failure into
+  self-correction on the next tool call — and make sure the alternative you
+  recommend is one your other hooks actually allow.
 
 ## Exit codes
 
@@ -48,7 +70,14 @@ on write failures — that bug masked silent audit loss for months.
   `hook-wrapper.sh`) is **5000ms**; over that the wrapper returns 124 → 2.
 - Avoid network calls in hot-path hooks. If a hook needs network (e.g.
   CloudWatch), do it asynchronously (`& disown`) so latency doesn't add to the
-  user-visible tool call.
+  user-visible tool call. If the result gates a decision (e.g. resolving a
+  repo's default branch), cache it with a TTL — and cache failures briefly
+  too, or one unresolvable repo re-pays the round trip on every call.
+- The cheapest way to meet the budget is to not run at all: a pure-shell
+  prefilter (`case "$payload" in *git*|*gh*) ;; *) exit 0 ;; esac`) before any
+  interpreter starts. Measured: two python-based guards went from ~263ms to
+  ~40ms combined on non-matching calls, which are the vast majority. An
+  in-interpreter early-exit saves nothing — interpreter startup is the cost.
 
 ## Telemetry schema (`/var/log/claude-code/hooks.jsonl`)
 
@@ -117,6 +146,12 @@ scripts/chain-verify.sh /var/log/claude-code/audit.jsonl
 1. Read this contract.
 2. Implement the hook to satisfy: input parsing, exit codes, latency budget.
 3. Add a unit test under `tests/test_<name>.sh` modelled on existing tests.
+   Note what unit tests CANNOT prove: registration. A mistyped path, a matcher
+   that never fires, and a working hook are observationally identical (nothing
+   blocked). After wiring, trip the hook once from a real session and confirm
+   the deny + non-empty stderr; for ongoing assurance, alarm on an active
+   session producing zero `hooks.jsonl` lines
+   ([`hook-hardening-lessons.md`](hook-hardening-lessons.md) §3).
 4. Wire it through `hook-wrapper.sh` in `managed-settings.json`:
    ```jsonc
    "command": "/usr/local/etc/claude-code/hooks/hook-wrapper.sh /usr/local/etc/claude-code/hooks/<your-hook>.sh"

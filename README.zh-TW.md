@@ -75,6 +75,13 @@ Claude Code 功能強大,但預設情況下可能會:
 完整的 STRIDE 攻擊樹分析請參考 [`docs/threat-model.md`](docs/threat-model.md);
 驗證過的效能與安全數據見 [`docs/test-evidence.md`](docs/test-evidence.md)。
 
+> ⚠️ **覆蓋範圍注意:** 第 2–3 層只在 **Bash** matcher 上觸發。若 session 裝有
+> 可寫入的 **MCP server**(GitHub MCP、Docker MCP Toolkit)或已認證的
+> **`gh` CLI**,這些寫入路徑會完全繞過所有 Bash-matcher hook — 已實證。
+> 需另註冊 `mcp__.*` matcher 的 hook,並讓 git guard 涵蓋 `gh api` 形式:
+> 見 [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) 與
+> [`docs/known-issues.md`](docs/known-issues.md) Issue 13。
+
 ## 設定階層
 
 Claude Code 從四個層級合併設定。較高層級覆蓋較低層級,managed 階層的拒絕規則無法被低層級移除:
@@ -322,6 +329,7 @@ aws bedrock delete-guardrail --guardrail-identifier <id>  # 清理
 - [`docs/known-issues.md`](docs/known-issues.md) — Matcher bug、平台特性、已驗證 workaround
 - [`docs/platform-compensations.md`](docs/platform-compensations.md) — NFS / Windows `--print` / macOS / Kubernetes 補償控制
 - [`docs/hook-contract.md`](docs/hook-contract.md) — Hook 輸入/輸出 schema、exit code 語意、遙測 schema、稽核日誌 schema
+- [`docs/hook-hardening-lessons.md`](docs/hook-hardening-lessons.md) — 實證強化教訓:MCP / `gh` 寫入路徑繞過、註冊 vs 邏輯驗證、parser 繞過類型、ARG_MAX payload 陷阱、誤報控制、prefilter 效能
 - [`docs/test-results.md`](docs/test-results.md) — 原始 Linux + Windows e2e 測試證據
 - [`docs/test-evidence.md`](docs/test-evidence.md) — 本機測試套件結果(PII、hooks、稽核鏈、繞過、延遲)
 
