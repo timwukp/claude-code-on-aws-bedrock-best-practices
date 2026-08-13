@@ -36,6 +36,9 @@ bash tests/test_gh_guard.sh; track $?
 step "9. MCP repo guard"
 bash tests/test_mcp_repo_guard.sh; track $?
 
+step "10. git guard"
+bash tests/test_git_guard.sh; track $?
+
 echo
 echo "=================================="
 echo "RUN-ALL: $OK suites passed, $FAIL failed"
