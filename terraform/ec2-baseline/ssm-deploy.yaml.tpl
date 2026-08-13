@@ -20,6 +20,8 @@ mainSteps:
         - set -euxo pipefail
         - install -d -m 0755 -o root -g root /usr/local/etc/claude-code/hooks
         - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/git-guard.sh /usr/local/etc/claude-code/hooks/
+        - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/gh-guard.sh /usr/local/etc/claude-code/hooks/
+        - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/mcp-repo-guard.sh /usr/local/etc/claude-code/hooks/
         - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/pii-guard.sh /usr/local/etc/claude-code/hooks/
         - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/audit-logger.sh /usr/local/etc/claude-code/hooks/
         - install -m 0755 -o root -g root /opt/claude-code-kit/hooks/hook-wrapper.sh /usr/local/etc/claude-code/hooks/
