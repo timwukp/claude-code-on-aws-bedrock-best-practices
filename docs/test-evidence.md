@@ -277,6 +277,70 @@ separately; not fixed here.
 
 ---
 
+## 7c. Multi-line command handling in both guards (EC2)
+
+`git-guard.sh` and `gh-guard.sh` both mis-handled a newline, in opposite
+directions ([`hook-hardening-lessons.md`](hook-hardening-lessons.md) §10). Fixed
+in v1.1.0 of each. Verified on the same ephemeral **t3.micro, Amazon Linux
+2023.12, bash 5.2.15(1), jq-1.8.1** instance, by running each payload against an
+unmodified `git archive` of the previous release and against the patched tree on
+the same host, with the same file.
+
+Exit codes: `0` = allowed, `2` = blocked.
+
+| Hook | Case | v1.0.0 | v1.1.0 | Wanted |
+|---|---|---|---|---|
+| `git-guard.sh` | push to `main` on line 2 of a 2-line command | 0 | 2 | 2 |
+| `git-guard.sh` | push to `master`, 3-line script | 0 | 2 | 2 |
+| `git-guard.sh` | `git push origin refs/heads/main` (qualified ref) | 0 | 2 | 2 |
+| `git-guard.sh` | force push with `-f` as the last word | 0 | 2 | 2 |
+| `git-guard.sh` | heredoc script fed to `bash` | 0 | 2 | 2 |
+| `git-guard.sh` | `$((1<<SHIFT))` then a push (phantom-body bypass) | 0 | 2 | 2 |
+| `git-guard.sh` | docs heredoc showing `git reset --hard` | 2 | 0 | 0 |
+| `git-guard.sh` | `rm -f` in a later segment read as a force push | 2 | 0 | 0 |
+| `git-guard.sh` | docs heredoc showing the blocked push | 0 | 0 | 0 |
+| `git-guard.sh` | quoted `"build \| bash"` in a heredoc opener | 0 | 0 | 0 |
+| `gh-guard.sh` | docs heredoc naming `gh pr merge` | 2 | 0 | 0 |
+| `gh-guard.sh` | heredoc body line starting with `gh api` | 2 | 0 | 0 |
+| `gh-guard.sh` | heredoc script fed to `bash` | 2 | 2 | 2 |
+| `gh-guard.sh` | `$((1<<SHIFT))` then `gh pr merge 1` | 2 | 2 | 2 |
+
+The three rows where v1.0.0 already returned the wanted code are there on
+purpose: `gh-guard.sh` blocked heredoc scripts *by accident*, through the same
+newline-splitting bug that caused its false positives, so the fix had to preserve
+that outcome for the right reason instead of dropping bodies wholesale.
+
+### Suite results on the patched tree
+
+| Suite | Result | Per-call latency |
+|---|---|---|
+| `tests/test_git_guard.sh` (new) | 83 passed, 0 failed | 60 ms |
+| `tests/test_gh_guard.sh` | 92 passed, 0 failed | 12 ms |
+| `tests/test_mcp_repo_guard.sh` | 43 passed, 0 failed | ~40 ms |
+| `tests/bypass-attempts.sh` | 60 passed, 0 failed (7 categories at 100%) | — |
+| `plugin/tests/run-tests.sh` | 108 passed, 0 failed | — |
+| `tests/run_all.sh` | 9 of 10 suites pass (the pre-existing `test_audit_chain.sh` failure below) | — |
+
+Worst case for the new parser is a large heredoc body: a 60 KB body costs
+**226 ms** in `git-guard.sh`, inside the 1 s per-call budget. Bodies are consumed
+line by line rather than character by character for this reason.
+
+**A third instance of the §9(a) fail-open.** The port introduced
+`local s="$1" n=${#s}` into a new helper. Under `set -u` on bash 5.2 the helper
+aborted, its caller read an empty string, concluded nothing ran a shell, and
+skipped the heredoc body — a fail-open, caught by 4 BLOCK assertions on Linux
+and by nothing on macOS. `bash -x` over one payload located it. The repository
+was then swept for the pattern; the remaining `local a=… b=…` sites all bind
+their referent on an earlier line.
+
+**Plugin copy drift.** `plugin/hooks/gh-guard.sh` sat a version behind
+`hooks/gh-guard.sh` for part of this work while every suite reported green,
+because nothing compared them. Both suites now assert byte-identical copies.
+`audit-logger.sh`, `hook-wrapper.sh`, `pii-guard.sh` and `token-budget-guard.sh`
+differ between the two trees **by design** and are excluded.
+
+---
+
 ## 8. Reproducibility
 
 ```bash
@@ -288,8 +352,11 @@ bash tests/run_all.sh
 
 Expected output ends with:
 ```
-RUN-ALL: 9 suites passed, 0 failed
+RUN-ALL: 10 suites passed, 0 failed
 ```
+On Linux, expect `9 suites passed, 1 failed` — the pre-existing
+`test_audit_chain.sh` failure described in §7b, which reproduces identically on
+an unmodified checkout.
 
 Total runtime: ~3 minutes on macOS dev box (most spent on the 1000-iteration
 latency bench).
