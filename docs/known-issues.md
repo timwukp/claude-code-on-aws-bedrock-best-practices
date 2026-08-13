@@ -447,3 +447,79 @@ switched off.
   by `gh-guard.sh`. Residual: writes from a subprocess the hook never inspects
   (a Python script using `requests`, a compiled binary) remain out of reach for
   any PreToolUse hook.
+
+---
+
+## Issue 14: `git-guard.sh` Does Not See Commands Wrapped in a Shell
+
+**Status:** open, mitigations below · **Applies to:** `hooks/git-guard.sh` ≤ v1.1.0
+
+### Symptom
+
+`git-guard.sh` matches command text with anchored regexes. A `git` command that
+is not lexically a command — because it sits inside a quoted argument to an
+interpreter — is not seen:
+
+```bash
+git push origin main               # blocked
+bash -c "git push origin main"     # ALLOWED (exit 0)
+sh -c 'git reset --hard HEAD~1'    # ALLOWED (exit 0)
+eval "git push origin main"        # ALLOWED (exit 0)
+```
+
+A related gap: a push with no arguments is not inspected at all, because the
+branch cannot be read from the command line.
+
+```bash
+git push                           # ALLOWED even when HEAD is main
+```
+
+### Root cause
+
+Two different things, both scoped deliberately out of the v1.1.0 fix:
+
+1. **No recursion into quoted arguments.** v1.1.0 separates heredoc bodies from
+   command text and re-scans a body that a shell consumes (`bash <<EOF`), which
+   is the same class of problem — but it does not recurse into the quoted
+   argument of `bash -c`. Doing that safely needs the tokenizer and segment
+   splitter that `gh-guard.sh` carries, plus a depth cap, and it must recurse
+   *only* for interpreters and wrappers: recursing into every quoted string
+   turns `echo "git push origin main"` into a denial.
+2. **`git push` with no refspec** requires resolving the current branch
+   (`git -C "$cwd" rev-parse --abbrev-ref HEAD`), so the check depends on
+   repository state rather than on the command string.
+
+`gh-guard.sh` is **not** affected by (1): it tokenizes, splits segments
+quote-aware, and recurses into interpreter arguments, so
+`bash -c "gh pr merge 1"` is blocked (regression test in
+`tests/test_gh_guard.sh`).
+
+### Workarounds
+
+- **Deny the wrappers in policy** rather than parsing them. A `permissions.deny`
+  entry for `Bash(bash -c:*)` / `Bash(sh -c:*)` / `Bash(eval:*)` removes the
+  wrapper class without touching the hook; see
+  [`docs/managed-settings.jsonc`](managed-settings.jsonc). Note the cost: agents
+  legitimately use `bash -c` for quoting, so expect friction.
+- **Server-side branch protection is the control that does not depend on
+  parsing.** Every bypass in this class ends in a push to a protected branch, and
+  a required-review rule refuses it regardless of how the command was spelled.
+  The hook is the fast, local, explanatory layer — not the last one.
+- `gh-guard.sh` already covers the same operations performed through `gh` or the
+  REST API, including inside `bash -c`.
+
+### Why it is not fixed here
+
+v1.1.0 closed the fail-opens that a *newline* caused, because those fired on
+ordinary multi-step commands that agents write constantly
+([`hook-hardening-lessons.md`](hook-hardening-lessons.md) §10). Wrapper
+recursion is a larger change to this hook's parsing front end — it is the point
+at which the two guards should share one parser instead of carrying two copies —
+and it deserves its own review and its own platform run rather than riding along
+with a fix that has different evidence behind it.
+
+### Tested on
+
+Amazon Linux 2023.12, bash 5.2.15(1), jq 1.8.1, via SSM; each case above run
+against both an unmodified v1.0.0 checkout and the patched tree on the same host
+([`test-evidence.md`](test-evidence.md) §7c).
