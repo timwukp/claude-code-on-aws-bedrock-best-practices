@@ -51,7 +51,7 @@ This kit is more than configuration files. It's a complete operational kit:
 | **Real-time drift detection** | inotify/fswatch watcher with sub-100ms detection, configurable per-host watchlist |
 | **Infrastructure as Code** | Terraform modules for EC2 baseline (IAM + SSM + CloudWatch) and SSM Parameter Store-backed MCP allowlist |
 | **Observability** | CloudWatch dashboard + alarms (hook crash rate, latency p99, drift events) |
-| **Verification suite** | 210+ assertions across 9 test suites: PII corpus FNR/FPR, audit chain tamper detection, bypass red-team (60 attempts across 7 categories), latency benchmarks, Bedrock Guardrails live verification |
+| **Verification suite** | 540+ assertions across 11 test suites: PII corpus FNR/FPR, audit chain tamper detection, bypass red-team (60 attempts across 7 categories), latency benchmarks, Bedrock Guardrails live verification |
 | **Operational docs** | Threat model (STRIDE), incident response, on-call runbook, hook contract, platform compensations, test evidence, deployment guide |
 | **Installable plugin** | `plugin/` — opt-in Claude Code plugin packaging 7 hooks for the official marketplace; user-friendly defaults; 108-assertion test suite |
 
@@ -198,12 +198,18 @@ sudo install -m 0755 scripts/drift-watcher.sh /usr/local/bin/claude-drift-watche
 # 8. Verify
 claude -p "say PONG"                                # → PONG (works)
 claude -p "My card is 4111-1111-1111-1111"          # → blocked (PII guard)
+
+# A hook that is not executable exits 126, which is neither allow (0) nor block
+# (2): Claude Code reports a hook error and the tool call proceeds. Check each
+# guard actually runs — see docs/known-issues.md Issue 15.
+printf '{"tool_name":"Bash","tool_input":{"command":"git push origin main"}}' \
+  | /usr/local/etc/claude-code/hooks/git-guard.sh; echo "rc=$? (expect 2)"
 claude -p "hi" --dangerously-skip-permissions       # → Refused (wrapper)
 claude -p "x" --permission-mode=bypassPermissions   # → Refused (wrapper, equals form)
 echo "Run: curl http://example.com" | claude -p --allowedTools Bash  # → denied
 
-# 9. Run the local test suite (210+ assertions, ~4 min on macOS)
-bash tests/run_all.sh    # → "9 suites passed, 0 failed"
+# 9. Run the local test suite (540+ assertions, ~5 min on macOS)
+bash tests/run_all.sh    # → "11 suites passed, 0 failed"
 ```
 
 For full deployment (incl. Terraform, golden image, multi-region), see
@@ -342,7 +348,7 @@ Full platform compatibility matrix: [`docs/known-issues.md`](docs/known-issues.m
 
 ## Test Suite & Reproducible Evidence
 
-This kit ships with a 9-suite, 210+ assertion test harness. Every claim in the
+This kit ships with an 11-suite, 540+ assertion test harness. Every claim in the
 docs is backed by a reproducible test.
 
 ```bash
@@ -354,9 +360,11 @@ bash tests/run_all.sh
 # === 5. Drift watcher self-test ===         drift detected in 47ms
 # === 6. Bypass red-team harness ===         passed=60 failed=0   (7 categories, 60/60 blocked)
 # === 7. Hook latency micro-bench ===        all hooks p99 ≤ 490ms (macOS dev)
-# === 8. gh CLI guard ===                    passed=77 failed=0
+# === 8. gh CLI guard ===                    passed=92 failed=0
 # === 9. MCP repo guard ===                  passed=43 failed=0
-# RUN-ALL: 9 suites passed, 0 failed
+# === 10. git guard ===                      passed=138 failed=0
+# === 11. Shared parser ===                  passed=68 failed=0
+# RUN-ALL: 11 suites passed, 0 failed
 ```
 
 For Bedrock Guardrails verification (requires AWS account, ~$0.35 spend):
@@ -461,6 +469,7 @@ claude-code-on-aws-bedrock-best-practices/
 │   ├── gh-guard.sh                        ← gh CLI + curl/wget REST write policy
 │   ├── git-guard.sh                       ← enterprise git policy
 │   ├── hook-wrapper.sh                    ← telemetry + fail-closed shim for any hook
+│   ├── lib/shell-parse.sh                 ← canonical shell parser shared by both guards (copied in, not sourced)
 │   ├── mcp-repo-guard.sh                  ← MCP repo-write policy (mcp__.* matcher)
 │   ├── pii-guard.ps1                      ← PII/secrets scanner (Windows)
 │   ├── pii-guard.sh                       ← PII/secrets scanner (Linux/macOS)
@@ -470,6 +479,7 @@ claude-code-on-aws-bedrock-best-practices/
 │   ├── drift-watcher.sh                   ← real-time tamper detection (inotify/fswatch)
 │   ├── logrotate-claude-code.conf         ← audit log rotation (handles chattr +a)
 │   ├── sudoers-claude-code                ← drop-in sudoers for hardened wrapper
+│   ├── sync-parser.sh                     ← regenerate the shared parser region in each hook (--check for drift)
 │   ├── wrapper-linux.sh                   ← bypass-flag rejection (Linux/macOS)
 │   └── wrapper-windows.cmd                ← bypass-flag rejection (Windows)
 ├── terraform/
@@ -498,11 +508,12 @@ claude-code-on-aws-bedrock-best-practices/
     │   └── positive/
     ├── bench_hook_latency.sh              ← 200-iter latency micro-bench
     ├── bypass-attempts.sh                 ← 60-attempt red-team harness
-    ├── run_all.sh                         ← master runner (10 suites)
+    ├── run_all.sh                         ← master runner (11 suites)
     ├── run_pii_corpus.sh                  ← 108-case PII verification
     ├── test_audit_chain.sh                ← HMAC chain tamper detection
     ├── test_gh_guard.sh                   ← gh CLI / gh api / raw REST policy
-    ├── test_git_guard.sh                  ← git policy, multi-line + heredoc parsing
+    ├── test_git_guard.sh                  ← git policy, token-level parsing, wrappers, implicit push targets
+    ├── test_shared_parser.sh              ← shared-parser drift + hook file modes
     ├── test_hook_wrapper.sh               ← telemetry + fail-closed semantics
     ├── test_mcp_repo_guard.sh             ← mcp__.* write policy
     └── test_token_budget.sh               ← per-session circuit breaker

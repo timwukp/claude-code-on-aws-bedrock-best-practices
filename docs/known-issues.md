@@ -452,7 +452,12 @@ switched off.
 
 ## Issue 14: `git-guard.sh` Does Not See Commands Wrapped in a Shell
 
-**Status:** open, mitigations below · **Applies to:** `hooks/git-guard.sh` ≤ v1.1.0
+**Status:** **fixed in `git-guard.sh` v1.2.0** · **Applies to:** `hooks/git-guard.sh` ≤ v1.1.0
+
+Left here rather than deleted, because the shape of the bug is the reusable part:
+one cause (deciding policy on command *text*) produced a fail-open and a false
+positive at the same time, in opposite directions. What changed, and the residual
+limit that remains, is at the end of this entry.
 
 ### Symptom
 
@@ -508,18 +513,122 @@ quote-aware, and recurses into interpreter arguments, so
 - `gh-guard.sh` already covers the same operations performed through `gh` or the
   REST API, including inside `bash -c`.
 
-### Why it is not fixed here
+### Why it was deferred out of v1.1.0
 
 v1.1.0 closed the fail-opens that a *newline* caused, because those fired on
 ordinary multi-step commands that agents write constantly
 ([`hook-hardening-lessons.md`](hook-hardening-lessons.md) §10). Wrapper
 recursion is a larger change to this hook's parsing front end — it is the point
 at which the two guards should share one parser instead of carrying two copies —
-and it deserves its own review and its own platform run rather than riding along
-with a fix that has different evidence behind it.
+and it deserved its own review and its own platform run rather than riding along
+with a fix that had different evidence behind it.
+
+### How v1.2.0 fixes it
+
+`git-guard.sh` no longer decides anything from the command text. Every segment is
+tokenized and policy runs on tokens, which makes the guard quote-aware in both
+directions at once: a quoted span is a single token, so `bash -c "git push origin
+main"` has a `git` that the scan can find *inside that token* by re-scanning it,
+while `echo "x; git push origin main"` has no `git` token at all and is allowed.
+
+- The parsing front end now has one canonical home,
+  [`hooks/lib/shell-parse.sh`](../hooks/lib/shell-parse.sh), copied into both
+  guards by `scripts/sync-parser.sh` and checked for drift by
+  `tests/test_shared_parser.sh`.
+- Recursion into quoted arguments happens **only** for interpreters and wrappers
+  (`bash -c`, `sh -c`, `eval`, `xargs`, `timeout`, …), with a depth cap of 3.
+- Wrappers that carry their own arguments are followed (`timeout 5 git push`,
+  `nohup`, `env VAR=1`, `sudo`), which was the same fail-open one step further
+  out. The identical gap in `gh-guard.sh` (`timeout 5 gh pr merge 1`) closed with
+  it.
+- Pushes whose target is not on the command line are resolved instead of skipped:
+  a bare `git push` asks `git -C <dir> rev-parse --abbrev-ref HEAD`, `--all` and
+  `--mirror` are refused outright.
+- Every refspec is checked rather than only the first, and `+ref:dst` counts as a
+  force push.
+
+**Residual limit.** A wrapper option that takes a non-flag value stops the walk,
+so `sudo -u bob git push origin main` is not recognised as a push. Skipping
+arbitrary words instead would let `xargs -I{} echo git push` read as a push, and
+a false positive on `echo` costs more than this case is worth. The two workarounds
+above (deny the wrapper class in policy; server-side branch protection) still
+cover it.
 
 ### Tested on
 
-Amazon Linux 2023.12, bash 5.2.15(1), jq 1.8.1, via SSM; each case above run
-against both an unmodified v1.0.0 checkout and the patched tree on the same host
-([`test-evidence.md`](test-evidence.md) §7c).
+Amazon Linux 2023.12, bash 5.2.15(1), jq 1.8.1, git 2.50.1, via SSM. Each case
+above was run against an unmodified `git archive` of the pre-fix commit and
+against the patched tree **on the same host, from the same test file**, so every
+changed verdict is attributable. Full matrix in
+[`test-evidence.md`](test-evidence.md) §7d.
+
+---
+
+## Issue 15: Two Hooks Shipped Without the Execute Bit (exit 126 = no enforcement)
+
+**Status:** **fixed** · **Applies to:** `hooks/gh-guard.sh`, `hooks/mcp-repo-guard.sh`
+and their `plugin/hooks/` copies, up to and including the commit before this one
+
+### Symptom
+
+`settings.json` names a hook by path. If the file is not executable, the exec
+fails and the wrapper reports **126** — which is neither `0` (allow) nor `2`
+(block), so Claude Code surfaces a hook error and **the tool call proceeds**. The
+guard is not bypassed so much as absent:
+
+```
+$ ls -l hooks/gh-guard.sh
+-rw-rw-r--. 1 ... hooks/gh-guard.sh          # committed as mode 100644
+$ printf '%s' "$payload" | hooks/gh-guard.sh
+bash: hooks/gh-guard.sh: Permission denied   # rc=126, the write is allowed
+```
+
+28 of the 60 rows in `tests/bypass-attempts.sh` were failing this way on a clean
+checkout: every `gh` row and every MCP row, including the ones that assert a
+*block*.
+
+### Root cause
+
+Two things, and the second is why it survived three releases:
+
+1. **The GitHub contents API creates files as `100644`.** These hooks were added
+   to the repository through `PUT /repos/{o}/{r}/contents/{path}`, which has no
+   mode parameter. `git-guard.sh` predated that path and kept its `100755`, which
+   is exactly why the defect looked like it could not exist.
+2. **Every unit suite `chmod +x`es its own hook** before the first assertion
+   (`chmod +x "$HOOK"` at the top of `tests/test_gh_guard.sh` and friends). So the
+   suites tested a file whose mode they had just repaired, and reported green.
+   `tests/bypass-attempts.sh` does not chmod, and its 126s are how this surfaced.
+
+A test that fixes the artefact before measuring it is not a test of what ships.
+
+### Fix
+
+- Both hooks and both plugin copies are `100755` again.
+- `tests/test_shared_parser.sh` asserts that every file in `hooks/` and
+  `plugin/hooks/` is executable, so the mode is a property of the repository
+  rather than something a suite repairs at runtime.
+- `scripts/sync-parser.sh` sets the execute bit on every file it writes, and
+  `--check` reports a plugin copy that has lost it.
+
+### If you have already installed these hooks
+
+```bash
+chmod +x ~/.claude/hooks/*.sh
+```
+
+Then confirm the guard actually runs — a hook that is not being executed looks
+exactly like a hook that allows everything:
+
+```bash
+printf '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"}}' \
+  | ~/.claude/hooks/gh-guard.sh; echo "rc=$?"   # expect rc=2
+```
+
+### Tested on
+
+Amazon Linux 2023.12, bash 5.2.15(1). `tests/run_all.sh` on a pristine
+`git archive` of the previous commit: 2 suites failing, 29 assertions, 28 of them
+`126`. Same command on the fixed tree: `tests/bypass-attempts.sh` 60/60, and the
+only remaining failure is the pre-existing `audit-logger.sh` one already recorded
+in [`test-evidence.md`](test-evidence.md) §7b.

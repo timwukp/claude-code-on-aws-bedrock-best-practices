@@ -1,17 +1,35 @@
 # Test Report — fail-closed-security-hooks
 
-**Last run:** 2026-08-13 · **Result: 108 passed / 0 failed (108 total)** · plugin v1.1.0 (pii-guard v2.0.1, git-guard v1.1.0, gh-guard v1.1.0, mcp-repo-guard v1.0.0)
+**Last run:** 2026-08-14 · **Result: 108 passed / 0 failed (108 total)** · plugin v1.2.0 (pii-guard v2.0.1, git-guard v1.2.0, gh-guard v1.2.0, mcp-repo-guard v1.0.0)
 
 Run on Amazon Linux 2023 (bash 5.2.15, jq 1.8.1) as well as macOS — see
 [`docs/test-evidence.md`](../../docs/test-evidence.md) §7b for why the Linux run
 is not optional.
 
 The hooks under `plugin/hooks/` that are meant to be byte-identical to their
-`hooks/` originals (`git-guard.sh`, `gh-guard.sh`, `mcp-repo-guard.sh`) are now
-asserted identical by `tests/test_git_guard.sh` and `tests/test_gh_guard.sh` in
-the repository root suite. A copy left a version behind is invisible to the
-suites in this directory, which is how it happened once
-([`docs/test-evidence.md`](../../docs/test-evidence.md) §7c).
+`hooks/` originals (`git-guard.sh`, `gh-guard.sh`, `mcp-repo-guard.sh`) are
+asserted identical by `tests/test_git_guard.sh`, `tests/test_gh_guard.sh` and
+`tests/test_shared_parser.sh` in the repository root suite. A copy left a version
+behind is invisible to the suites in this directory, which is how it happened
+twice ([`docs/test-evidence.md`](../../docs/test-evidence.md) §7c, §7d).
+
+Two things the suites in this directory still cannot see, both now covered in the
+root suite:
+
+- **File modes.** `plugin/hooks/gh-guard.sh` and `plugin/hooks/mcp-repo-guard.sh`
+  shipped as `100644`. This suite invokes hooks as `bash <hook>`, which works
+  regardless of the execute bit; Claude Code invokes them by path, which returns
+  `126` and lets the tool call through
+  ([`docs/known-issues.md`](../../docs/known-issues.md) Issue 15).
+  `tests/test_shared_parser.sh` asserts the mode of every shipped hook.
+- **v1.2.0 parsing.** The 16 git-guard assertions below cover the eight policy
+  checks, not the parser. Wrapper forms (`bash -c "git push origin main"`),
+  implicit push targets (`git push` with HEAD on `main`) and multi-refspec pushes
+  are covered by the 138 assertions in `tests/test_git_guard.sh`. All 108
+  assertions here pass unchanged against v1.2.0 of both guards, verified on
+  Amazon Linux 2023 (bash 5.2.15, git 2.50.1) against a pristine `git archive` of
+  the previous commit on the same host — identical 108/0 on both, so the plugin's
+  behaviour on its own coverage did not move.
 
 Reproducible — regenerate any time:
 
